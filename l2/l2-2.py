@@ -1,3 +1,6 @@
+'''
+提示词模板 + 输出解析器
+'''
 # 导入LangChain中的提示模板
 from langchain.prompts import PromptTemplate
 # 创建原始提示模板

@@ -1,3 +1,6 @@
+'''
+langchain知识库的简单实现
+'''
 # 1.Load 导入Document Loaders
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.document_loaders import Docx2txtLoader
@@ -31,6 +34,8 @@ chunked_documents = text_splitter.split_documents(documents)
 from langchain_community.vectorstores import Qdrant
 from langchain_community.embeddings import HuggingFaceBgeEmbeddings
  
+# 此处需要设置代理翻墙 huggingface你懂的。先挂v2ray代理
+os.environ['https_proxy'] = 'http://localhost:10809'
 bge_embeddings = HuggingFaceBgeEmbeddings(model_name="BAAI/bge-large-zh-v1.5")
 
 vectorstore = Qdrant.from_documents(
