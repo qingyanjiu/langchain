@@ -1,13 +1,10 @@
 '''
 思维链
 '''
-# 设置环境变量和API密钥
-import os
-os.environ["OPENAI_API_KEY"] = '你的OpenAI API Key'
 
 # 实例化一个大模型工具
 from langchain_community.llms import Ollama
-llm = Ollama(base_url='http://localhost:11434', model="llama3-cn", temperature=0.0)
+llm = Ollama(base_url='http://localhost:11434', model="llama3-cn", temperature=0.5)
 
 # 设定 AI 的角色和目标
 role_template = "你是一个为花店电商公司工作的AI助手, 你的目标是帮助客户根据他们的喜好做出明智的决定"
