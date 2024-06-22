@@ -19,7 +19,9 @@ template = """
 颜色: {color}
 植物学家: 这是关于上述花的介绍:"""
 prompt_template = PromptTemplate(input_variables=["name", "color"], template=template)
+# 这种写法即将启用
 # introduction_chain = LLMChain(llm=llm, prompt=prompt_template, output_key="introduction")
+# 官方建议使用这种方式来定义llmchain  prompt | llm | {output_key: outputParser}
 introduction_chain = prompt_template | llm | {"introduction": StrOutputParser()}
 print(introduction_chain.invoke({"name":"玫瑰", "color": "黑色"}))
 
