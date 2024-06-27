@@ -19,7 +19,7 @@ def convert_to_base64(pil_image):
     img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
     return img_str
 
-file_path = "l7/1.png"
+file_path = "l7/smoke.png"
 pil_image = Image.open(file_path)
 image_b64 = convert_to_base64(pil_image)
 
