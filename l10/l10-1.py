@@ -1,6 +1,7 @@
 '''
 通过Memory记住客户上次买花时的对话细节
 ConversationChain + ConversationBufferMemory
+通过 ConversationBufferMemory（缓冲记忆）可以实现最简单的记忆机制
 '''
 
 from langchain.chains.conversation.base import ConversationChain
