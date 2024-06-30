@@ -38,7 +38,7 @@ my_multiply = StructuredTool.from_function(
 # 初始化大语言模型
 from langchain_community.llms.ollama import Ollama
 
-llm = Ollama(base_url='http://localhost:11434', model="llama3-cn", temperature=0.2)
+llm = Ollama(base_url='http://localhost:11434', model="llama3-cn", temperature=0)
 
 import os
 
@@ -51,7 +51,7 @@ from langchain.agents import load_tools
 from langchain.agents import initialize_agent
 from langchain.agents import AgentType
 
-search_wrapper = BingSearchAPIWrapper(k=1)
+search_wrapper = BingSearchAPIWrapper(k=3)
 
 # 测试bing搜索api
 # result = search_wrapper.run("python")
@@ -60,14 +60,13 @@ search_wrapper = BingSearchAPIWrapper(k=1)
 tool = BingSearchResults(api_wrapper=search_wrapper)
 # pip install numexpr -i https://pypi.tuna.tsinghua.edu.cn/simple
 # 使用默认llm-math数学函数，有时候计算会报错
-tools = load_tools(["bing-search", "llm-math"], llm=llm)
+# tools = load_tools(["bing-search", "llm-math"], llm=llm)
 
 # 尝试使用自定义计算
-# tools = load_tools(["bing-search"], llm=llm)
-# tools.append(my_calc)
+tools = load_tools(["bing-search"], llm=llm)
+tools.append(my_calc)
 
 agent = initialize_agent(tools, llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, verbose=True)
-# RULES:请返回一个数字 很有用。。。
-result = agent.invoke("RULES:请返回一个数字 \n2024年6月合肥西瓜价格是多少？如果我在此基础上加价15%卖出，应该如何定价？")
+result = agent.invoke('''2024年6月30日淘宝iphone15的价格是多少?如果我在此基础上加价15%卖出，应该如何定价？''')
 # result = agent.invoke("145乘以2等于多少")
 print(result)
