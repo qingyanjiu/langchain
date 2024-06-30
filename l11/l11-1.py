@@ -38,7 +38,7 @@ my_multiply = StructuredTool.from_function(
 # 初始化大语言模型
 from langchain_community.llms.ollama import Ollama
 
-llm = Ollama(base_url='http://localhost:11434', model="llama3-cn", temperature=0)
+llm = Ollama(base_url='http://localhost:11434', model="llama3-cn", temperature=0.5)
 
 import os
 
@@ -51,7 +51,7 @@ from langchain.agents import load_tools
 from langchain.agents import initialize_agent
 from langchain.agents import AgentType
 
-search_wrapper = BingSearchAPIWrapper(k=3)
+search_wrapper = BingSearchAPIWrapper(k=1)
 
 # 测试bing搜索api
 # result = search_wrapper.run("python")
@@ -68,5 +68,6 @@ tools.append(my_calc)
 
 agent = initialize_agent(tools, llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, verbose=True)
 result = agent.invoke('''2024年6月30日淘宝iphone15的价格是多少?如果我在此基础上加价15%卖出，应该如何定价？''')
-# result = agent.invoke("145乘以2等于多少")
+# result = agent.invoke("鸡肉亲子盖饭的原料有哪些？")
+# result = agent.invoke("7月1日欧洲杯有哪些比赛？")
 print(result)
