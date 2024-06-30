@@ -29,8 +29,10 @@ print(result)
 
 # 回合2
 result = conversation.invoke("她喜欢粉色玫瑰，颜色是粉色的。")
+print('='*20)
 print(result)
 
 # 回合3 （第二天的对话）
 result = conversation.invoke("我又来了，还记得我昨天为什么要来买花吗？")
+print('='*20)
 print(result)
