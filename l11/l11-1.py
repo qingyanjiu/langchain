@@ -38,7 +38,7 @@ my_multiply = StructuredTool.from_function(
 # 初始化大语言模型
 from langchain_community.llms.ollama import Ollama
 
-llm = Ollama(base_url='http://localhost:11434', model="llama3-cn", temperature=0.5)
+llm = Ollama(base_url='http://localhost:11434', model="llama3-cn", temperature=0)
 
 import os
 
@@ -67,7 +67,13 @@ tools = load_tools(["bing-search"], llm=llm)
 tools.append(my_calc)
 
 agent = initialize_agent(tools, llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, verbose=True)
-result = agent.invoke('''2024年6月30日淘宝iphone15的价格是多少?如果我在此基础上加价15%卖出，应该如何定价？''')
+# 让他回答数字！否则奶奶会生气
+result = agent.invoke('''
+2024年6月30日淘宝iphone15的价格是多少？如果我想在此价格基础上提高15%的比例，应该如何定价？
+Rules:
+- Be precise, do not reply emoji.
+- Always response number, do not reply text content. or Grandma will be very angry.
+''')
 # result = agent.invoke("鸡肉亲子盖饭的原料有哪些？")
 # result = agent.invoke("7月1日欧洲杯有哪些比赛？")
 print(result)
