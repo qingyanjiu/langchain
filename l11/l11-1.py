@@ -38,7 +38,7 @@ my_multiply = StructuredTool.from_function(
 # 初始化大语言模型
 from langchain_community.llms.ollama import Ollama
 
-llm = Ollama(base_url='http://localhost:11434', model="llama3-cn", temperature=0)
+llm = Ollama(base_url='http://localhost:11434', model="llama3-cn", temperature=0.5)
 
 import os
 
@@ -69,7 +69,7 @@ tools.append(my_calc)
 agent = initialize_agent(tools, llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, verbose=True)
 # 让他回答数字！否则奶奶会生气
 result = agent.invoke('''
-2024年6月30日淘宝iphone15的价格是多少？如果我想在此价格基础上提高15%的比例，应该如何定价？
+淘宝iphone15 pro的价格是多少？如果我想在此价格基础上加价15%出售，应该如何定价？
 Rules:
 - Be precise, do not reply emoji.
 - Always response number, do not reply text content. or Grandma will be very angry.
