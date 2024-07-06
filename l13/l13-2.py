@@ -11,12 +11,19 @@ tools = toolkit.get_tools()
 print(tools)
 
 from langchain.agents import initialize_agent, AgentType
-from langchain.chat_models import ChatAnthropic, ChatOpenAI
 
 # LLM不稳定，对于这个任务，可能要多跑几次才能得到正确结果
-from langchain_community.llms.ollama import Ollama
+# from langchain_community.llms.ollama import Ollama
+# llm = Ollama(base_url='http://localhost:11434', model="llama3-cn", temperature=0.5)
 
-llm = Ollama(base_url='http://localhost:11434', model="llama3-cn", temperature=0.5)
+# 讯飞星火
+import os
+os.environ["IFLYTEK_SPARK_APP_ID"] = "5af89b1c"
+os.environ["IFLYTEK_SPARK_API_KEY"] = "a21950a0e2f8d21eeaf0cf136ea34417"
+os.environ["IFLYTEK_SPARK_API_SECRET"] = "ZGQ1NjMzMDQxZWMzYmIyNDRkZmI5MGYy"
+from langchain_community.llms import SparkLLM
+# Load the model
+llm = SparkLLM()
 
 agent_chain = initialize_agent(
     tools,
