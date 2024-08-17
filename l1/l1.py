@@ -8,7 +8,7 @@ from langchain_community.document_loaders import TextLoader
 import os
 
 # 加载Documents
-base_dir = '/Users/louisliu/Documents/coder/project/langchain/docs' # 文档的存放目录
+base_dir = r'C:\Users\louis\Desktop\tmp\langchain\docs' # 文档的存放目录
 documents = []
 for file in os.listdir(base_dir): 
     # 构建完整的文件路径
@@ -35,8 +35,10 @@ from langchain_community.vectorstores import Qdrant
 from langchain_community.embeddings import HuggingFaceBgeEmbeddings
  
 # 此处需要设置代理翻墙 huggingface你懂的。先挂v2ray代理
-os.environ['https_proxy'] = 'http://localhost:10809'
-bge_embeddings = HuggingFaceBgeEmbeddings(model_name="BAAI/bge-large-zh-v1.5")
+# os.environ['https_proxy'] = 'http://localhost:10809'
+# bge_embeddings = HuggingFaceBgeEmbeddings(model_name="BAAI/bge-large-zh-v1.5")
+bge_embeddings = HuggingFaceBgeEmbeddings(model_name=r"C:\Users\louis\.cache\huggingface\hub\models--BAAI--bge-large-zh-v1.5\snapshots\79e7739b6ab944e86d6171e44d24c997fc1e0116")
+
 
 vectorstore = Qdrant.from_documents(
     documents=chunked_documents, # 以分块的文档
@@ -56,7 +58,7 @@ logging.basicConfig()
 logging.getLogger('langchain.retrievers.multi_query').setLevel(logging.INFO)
 
 # 实例化一个大模型工具
-llm = Ollama(base_url='http://192.168.100.85:11434', model="llama3-cn", temperature=0)
+llm = Ollama(base_url='http://localhost:11434', model="llama3-cn", temperature=0)
 
 # 实例化一个MultiQueryRetriever
 retriever_from_llm = MultiQueryRetriever.from_llm(retriever=vectorstore.as_retriever(), llm=llm)
@@ -66,5 +68,5 @@ qa_chain = RetrievalQA.from_chain_type(llm,retriever=retriever_from_llm)
 
 
 # result = qa_chain.invoke({"query": "像素流的优势是什么"})
-result = qa_chain.invoke({"query": "手势识别控制是什么"})
+result = qa_chain.invoke({"query": "玩家每回合可以有哪些行动？"})
 print(result)
