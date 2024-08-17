@@ -58,19 +58,14 @@ from langchain_experimental.sql import SQLDatabaseChain
 # 连接到FlowerShop数据库（之前我们使用的是Chinook.db）
 db = SQLDatabase.from_uri("sqlite:///FlowerShop.db")
 
-
-import os
-# 讯飞星火
-os.environ["IFLYTEK_SPARK_APP_ID"] = "5af89b1c"
-os.environ["IFLYTEK_SPARK_API_KEY"] = "a21950a0e2f8d21eeaf0cf136ea34417"
-os.environ["IFLYTEK_SPARK_API_SECRET"] = "ZGQ1NjMzMDQxZWMzYmIyNDRkZmI5MGYy"
-from langchain_community.llms import SparkLLM
-# Load the model
-# llm = SparkLLM()
-
 from langchain_community.llms import Ollama
 # 实例化一个大模型工具
-llm = Ollama(base_url='http://localhost:11434', model="llama3-cn", temperature=0)
+# llm = Ollama(base_url='http://localhost:11434', model="llama3-cn", temperature=0)
+
+import sys
+sys.path.append('.')
+from spark_llm import gen_spark_llm
+llm = gen_spark_llm()
 
 # 创建SQL数据库链实例，它允许我们使用LLM来查询SQL数据库
 db_chain = SQLDatabaseChain.from_llm(llm, db, verbose=True)
