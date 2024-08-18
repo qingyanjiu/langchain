@@ -1,7 +1,9 @@
 import sys
+import asyncio
+
 sys.path.append('.')
 from spark_llm import gen_spark_llm
-llm = gen_spark_llm()
+llm = gen_spark_llm(streaming=True)
 
 # 导入所需的库和模块
 from langchain.schema import HumanMessage, SystemMessage
@@ -24,8 +26,12 @@ class CommandlineChatbot:
                 break
             # 将用户的输入添加到消息列表中，并获取机器人的响应
             self.messages.append(HumanMessage(content=user_input))
-            response = self.chat.generate(self.messages)
-            print(f"Chatbot: {response}")
+            chunks = []
+            for chunk in self.chat.stream(self.messages):
+                chunks.append(chunk)
+                for c in chunk:
+                    print(c, end="", flush=True)
+            print('\n')
 
 # 如果直接运行这个脚本，启动聊天机器人
 if __name__ == "__main__":

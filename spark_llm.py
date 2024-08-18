@@ -5,7 +5,7 @@ os.environ["IFLYTEK_SPARK_APP_ID"] = "5af89b1c"
 os.environ["IFLYTEK_SPARK_API_KEY"] = "a21950a0e2f8d21eeaf0cf136ea34417"
 os.environ["IFLYTEK_SPARK_API_SECRET"] = "ZGQ1NjMzMDQxZWMzYmIyNDRkZmI5MGYy"
 
-def gen_spark_llm():
+def gen_spark_llm(streaming=False):
     # Load the model
-    llm = SparkLLM(spark_api_url='wss://spark-api.xf-yun.com/v1.1/chat', spark_llm_domain='general')
+    llm = SparkLLM(spark_api_url='wss://spark-api.xf-yun.com/v1.1/chat', spark_llm_domain='general', streaming=streaming)
     return llm
