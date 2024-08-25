@@ -1,13 +1,13 @@
 import sys
 import asyncio
 
-# sys.path.append('.')
-# from spark_llm import gen_spark_llm
-# llm = gen_spark_llm(streaming=True)
+sys.path.append('.')
+from spark_llm import gen_spark_llm
+llm = gen_spark_llm(streaming=True)
 
 from langchain_community.llms.ollama import Ollama
 # 实例化一个大模型工具
-llm = Ollama(base_url='http://localhost:11434', model="llama3-cn", temperature=1, verbose=True)
+# llm = Ollama(base_url='http://localhost:11434', model="llama3-cn", temperature=1, verbose=True)
 
 # 导入所需的库和模块
 from langchain.schema import HumanMessage, SystemMessage
