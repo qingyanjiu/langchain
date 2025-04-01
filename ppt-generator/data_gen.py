@@ -8,74 +8,71 @@ llm = ChatOpenAI(model_name="deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
                         base_url='https://api.siliconflow.cn/v1')
 
 def extract_items(input_string):
-    # Find the text inside the << >>
+    # 查找 << >> 内的内容
     content = re.search(r'<<(.+?)>>', input_string.content)
-
     if content:
         content = content.group(1)
     else:
         return []
-
-    # Split the content by the | separator and remove whitespace
+    
+    # 按 | 分割内容并去除空格
     items = [item.strip() for item in content.split('|')]
-
-    # Remove the quotes from each item
+    
+    # 去除引号
     items = [re.sub(r'^"|"$', '', item) for item in items]
-
+    
     return items
 
-
-def slide_data_gen(topic):
-
+def slide_data_gen(topic, page_num=5):
     slide_data = []
-
     point_count = 5
 
     slide_data.append(extract_items(llm.invoke(f"""
-    You are a text summarization and formatting specialized model that fetches relevant information
-
-    For the topic "{topic}" suggest a presentation title and a presentation subtitle it should be returned in the format :
-    << "title" | "subtitle" >>
-
-    example :
-    << "Ethics in Design" | "Integrating Ethics into Design Processes" >>
+    你是一个擅长文本总结和格式化的模型，能够提取相关信息。
+    
+    针对主题 "{topic}"，请建议一个演示文稿的标题和副标题，返回格式如下：
+    << "标题" | "副标题" >>
+    
+    示例：
+    << "设计原则" | "将原则整合到设计流程中" >>
     """)))
 
     slide_data.append(extract_items(llm.invoke(f"""
-    You are a text summarization and formatting specialized model that fetches relevant information
-            
-    For the presentation titled "{slide_data[0][0]}" and with subtitle "{slide_data[0][1]}" for the topic "{topic}"
-    Write a table of contents containing the title of each slide for a 7 slide presentation
-    It should be of the format :
-    << "slide1" | "slide2" | "slide3" | ... | >>
-            
-    example :
-    << "Introduction to Design Ethics" | "User-Centered Design" | "Transparency and Honesty" | "Data Privacy and Security" | "Accessibility and Inclusion" | "Social Impact and Sustainability" | "Ethical AI and Automation" | "Collaboration and Professional Ethics" >>          
+    你是一个擅长文本总结和格式化的模型，能够提取相关信息。
+    
+    针对主题 "{topic}"，演示文稿标题为 "{slide_data[0][0]}"，副标题为 "{slide_data[0][1]}"，
+    请编写 {page_num} 张幻灯片的目录，每张幻灯片对应一个小标题。
+    结果格式如下：
+    << "幻灯片1" | "幻灯片2" | "幻灯片3" | ... | >>
+    
+    示例：
+    << "设计伦理简介" | "以用户为中心的设计" | "透明度与诚信" | "数据隐私与安全" | "无障碍设计与包容性" | "社会影响与可持续性" | "人工智能伦理" >>
     """)))
 
     for subtopic in slide_data[1]:
-
         data_to_clean = llm.invoke(f"""
-        You are a content generation specialized model that fetches relevant information and presents it in clear concise manner
-                
-        For the presentation titled "{slide_data[0][0]}" and with subtitle "{slide_data[0][1]}" for the topic "{topic}"
-        Write the contents for a slide with the subtopic {subtopic}
-        Write {point_count} points. Each point 10 words maximum.
-        Make the points short, concise and to the point.
+        你是一个擅长内容生成的模型，能够提取相关信息并以清晰简洁的方式呈现。
+        
+        针对主题 "{topic}"，演示文稿标题为 "{slide_data[0][0]}"，副标题为 "{slide_data[0][1]}"，
+        请撰写一张关于 "{subtopic}" 的幻灯片内容。
+        
+        请写出 {point_count} 个要点，每个要点最多 10 个字。
+        要点应简短、清晰、直奔主题。
         """)
 
         cleaned_data = llm.invoke(f"""
-        You are a text summarization and formatting specialized model that fetches relevant information and formats it into user specified formats
-        Given below is a text draft for a presentation slide containing {point_count} points , extract the {point_count} sentences and format it as :
-                    
-        << "point1" | "point2" | "point3" | ... | >>
-                    
-        example :
-        << "Foster a collaborative and inclusive work environment." | "Respect intellectual property rights and avoid plagiarism." | "Uphold professional standards and codes of ethics." | "Be open to feedback and continuous learning." >>
-
-        -- Beginning of the text --
+        你是一个擅长文本总结和格式化的模型，能够提取相关信息并按用户指定的格式呈现。
+        
+        以下是一张幻灯片的文本草稿，包含 {point_count} 个要点，请提取 {point_count} 句话，并按以下格式返回：
+        
+        << "要点1" | "要点2" | "要点3" | ... | >>
+        
+        示例：
+        << "营造合作和包容的工作环境。" | "尊重知识产权，避免抄袭。" | "遵守专业标准和伦理准则。" | "开放接受反馈，持续学习。" >>
+        
+        -- 文本开始 --
         {data_to_clean}
-        -- End of the text --         
+        -- 文本结束 --
         """)
 
         slide_data.append([subtopic] + extract_items(cleaned_data))
