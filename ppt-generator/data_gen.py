@@ -1,11 +1,15 @@
 import re
-from langchain_community.llms import Ollama
+from langchain.chat_models.openai import ChatOpenAI
 
-llm = Ollama(base_url='http://localhost:11434', model="llama3-cn", temperature=0.7)
+# 创建 ChatOpenAI 实例
+llm = ChatOpenAI(model_name="deepseek-ai/DeepSeek-R1-Distill-Qwen-32B", 
+                        temperature=0.7, 
+                        api_key='sk-sdcxstsuwiefzutgkridojrlcovgaggxddyvaicqwynpxebq', 
+                        base_url='https://api.siliconflow.cn/v1')
 
 def extract_items(input_string):
     # Find the text inside the << >>
-    content = re.search(r'<<(.+?)>>', input_string)
+    content = re.search(r'<<(.+?)>>', input_string.content)
 
     if content:
         content = content.group(1)
@@ -31,7 +35,7 @@ def slide_data_gen(topic):
     You are a text summarization and formatting specialized model that fetches relevant information
 
     For the topic "{topic}" suggest a presentation title and a presentation subtitle it should be returned in the format :
-    << "title" | "subtitle >>
+    << "title" | "subtitle" >>
 
     example :
     << "Ethics in Design" | "Integrating Ethics into Design Processes" >>
