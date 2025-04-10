@@ -124,9 +124,10 @@ def merge_pptx(files: list[str], output_file: str):
 
 base_template_path = "ppt_templates"
 file_name_list = [
-    os.path.join(base_template_path, "t1.pptx"),
-    os.path.join(base_template_path, "t2.pptx"),
-    os.path.join(base_template_path, "t3.pptx"),
+    os.path.join(base_template_path, "all.pptx"),
+    # os.path.join(base_template_path, "t1.pptx"),
+    # os.path.join(base_template_path, "t2.pptx"),
+    # os.path.join(base_template_path, "t3.pptx"),
 ]
 # 合并模板
 t = gen_new_template(file_name_list)
@@ -151,15 +152,15 @@ placeholders_to_replace = [
         "{{text4}}": "文档与交付",
         "{{text5}}": "签署验收报告",
     },
-    {
-        "{{title}}": "项目开发过程",
-        "{{text1}}": "需求分析",
-        "{{text2}}": "方案设计",
-        "{{text3}}": "开发实现",
-        "{{text4}}": "测试验证",
-        "{{text5}}": "上线部署",
-        "{{text6}}": "维护优化",
-    },
+    # {
+    #     "{{title}}": "项目开发过程",
+    #     "{{text1}}": "需求分析",
+    #     "{{text2}}": "方案设计",
+    #     "{{text3}}": "开发实现",
+    #     "{{text4}}": "测试验证",
+    #     "{{text5}}": "上线部署",
+    #     "{{text6}}": "维护优化",
+    # },
 ]
 
 # 渲染合成过后的模板
