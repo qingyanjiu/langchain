@@ -4,134 +4,75 @@ from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.util import Pt
 
-# 通过ppt文件对象和占位符对象渲染所有页ppt
-def gen_content(prs, placeholders_to_replace):
-    # 遍历每一张幻灯片
-    for slide_number, slide in enumerate(prs.slides, start=1):
-        print(f"幻灯片 {slide_number}:")
-        placeholders_to_replace_in_page = placeholders_to_replace[slide_number - 1]
-        # 遍历幻灯片中的所有占位符
-        for placeholder in slide.placeholders:
-            # 遍历预设的占位符和替换内容
-            for placeholder_text, replacement_text in placeholders_to_replace_in_page.items():
-                if placeholder_text in placeholder.text:
-                    print(f"替换占位符文本: {placeholder_text} -> {replacement_text}")
-                    placeholder.text = placeholder.text.replace(placeholder_text, replacement_text)
-                    
-        
+
+# 将多个单页PPTX组装成完整的PPTX
+def compose_pptx_template(pptx_file_paths: list[str], output_path) -> Presentation:
+    # 创建一个新的空白演示文稿
+    merged_prs = Presentation()
+    merged_prs.slide_width = Pt(960)   # 宽屏分辨率宽度
+    merged_prs.slide_height = Pt(540)  # 宽屏分辨率高度
+
+    # 由于默认会有1页空白幻灯片，先删除它
+    if len(merged_prs.slides) == 1 and not merged_prs.slides[0].shapes:
+        xml_slides = merged_prs.slides._sldIdLst
+        slides = list(xml_slides)
+        xml_slides.remove(slides[0])
+
+    for pptx_file_path in pptx_file_paths:
+        print(f"合并文件：{pptx_file_path}")
+        src_prs = Presentation(pptx_file_path)
+
+        for slide in src_prs.slides:
+            # 使用空白布局添加一页新幻灯片
+            new_slide = merged_prs.slides.add_slide(merged_prs.slide_layouts[6])
+
             for shape in slide.shapes:
-                # 检查是否是占位符并且是图片类型
-                if shape.is_placeholder:
-                    if (shape.placeholder_format.type == MSO_SHAPE_TYPE.PICTURE or shape.name.find('Picture') != -1) \
-                        and not placeholder.text:
-                        print(f"插入图片到占位符位置")
-                        # 插入图片到占位符中
-                        left = placeholder.left
-                        top = placeholder.top
-                        pic_path = "/Users/louisliu/Downloads/1.jpeg"  # 图片文件路径
-                        pic = slide.shapes.add_picture(pic_path, left, top, width=placeholder.width, height=placeholder.height)
-    return prs
+                # 拷贝每个形状
+                el = shape.element
+                new_el = copy.deepcopy(el)
+                new_slide.shapes._spTree.insert_element_before(new_el, 'p:extLst')
+
+    # 保存合并后的新文件
+    merged_prs.save(output_path)
+    print(f"\n✅ 合并完成，保存为：{output_path}")
+
+# 通过文本框替换文本（只需要处理普通PPT文件，不需要PPT模板提供占位符）
+def fill_pptx_content(pptx_path, output_path, placeholders_to_replace):
+    prs = Presentation(pptx_path)
+
+    def replace_text_in_shapes(shapes, placeholders_to_replace_in_page):
+        for shape in shapes:
+            if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+                # 是组合形状，递归处理
+                replace_text_in_shapes(shape.shapes, placeholders_to_replace_in_page)
+            elif shape.has_text_frame:
+                for paragraph in shape.text_frame.paragraphs:
+                    for run in paragraph.runs:
+                        for placeholder_text, replacement_text in placeholders_to_replace_in_page.items():
+                            if placeholder_text in run.text:
+                                print(f"替换占位符: {placeholder_text} -> {replacement_text}")
+                                run.text = run.text.replace(placeholder_text, replacement_text)
+
+    for slide_idx, slide in enumerate(prs.slides, start=1):
+        print(f"🔄 正在处理幻灯片 {slide_idx} ...")
+        placeholders_to_replace_in_page = placeholders_to_replace[slide_idx - 1]
+        replace_text_in_shapes(slide.shapes, placeholders_to_replace_in_page)
+
+    prs.save(output_path)
+    print(f"\n✅ 替换完成，已保存为：{output_path}")
 
 
-# 将多个单页模板组装成完整模板
-def gen_new_template(templates: list[str]) -> Presentation:
-    # 创建一个新的 PowerPoint 文件
-    new_template = Presentation()
-    new_template.slide_width = Pt(960)   # 宽屏分辨率宽度
-    new_template.slide_height = Pt(540)  # 宽屏分辨率高度
-    for template in templates:
-        tempPrs = Presentation(template)
-        # 将模板中的所有幻灯片添加到新的演示文稿
-        for slide in tempPrs.slides:
-            slide_copy = new_template.slides.add_slide(slide.slide_layout)
-            # 遍历原始幻灯片的形状
-            for shape in slide.shapes:
-                if shape.is_placeholder:  # 如果是占位符
-                    # 获取当前占位符的类型（比如标题，占位符编号等）
-                    placeholder_idx = shape.placeholder_format.idx
-                    # 获取占位符的文本
-                    if shape.has_text_frame:
-                        text = shape.text  # 获取文本内容
-                    else:
-                        text = ''
-                    # 尝试在新幻灯片中找到相应的占位符
-                    try:
-                        new_shape = slide_copy.shapes.placeholders[placeholder_idx]
-                        # 复制占位符的大小和位置
-                        new_shape.left = shape.left
-                        new_shape.top = shape.top
-                        new_shape.width = shape.width
-                        new_shape.height = shape.height
-                        # 复制文本内容
-                        if new_shape.has_text_frame:
-                            new_shape.text = text
-                    except KeyError:
-                        # 如果找不到相应的占位符，跳过或者做其他处理
-                        print(f"Warning: No placeholder with idx {placeholder_idx} on the new slide.")
-                        # 你可以选择继续或者用其他方法处理，比如用文本框替代占位符
-                        pass
-                # 处理图片占位符
-                # elif shape.shape_type == 13:  # 图片类型
-                #     # 复制图片占位符
-                #     new_shape = slide_copy.shapes.add_picture(shape.image.filename, shape.left, shape.top, shape.width, shape.height)
-    return new_template
 
-
-def merge_pptx(files: list[str], output_file: str):
-    # 创建一个新的空 PowerPoint 文件
-    merged_ppt = Presentation()
-
-    # 遍历每个文件
-    for file in files:
-        # 打开当前 PowerPoint 文件
-        ppt = Presentation(file)
-        
-        # 将每个幻灯片添加到新的演示文稿中
-        for slide in ppt.slides:
-            # 获取当前幻灯片的布局
-            slide_layout = slide.slide_layout
-
-            # 使用相同的布局添加幻灯片
-            new_slide = merged_ppt.slides.add_slide(slide_layout)
-
-            # 复制幻灯片中的所有形状（文本框、图片等）
-            for shape in slide.shapes:
-                if shape.is_placeholder:  # 复制占位符内容
-                    if shape.has_text_frame:
-                        # 复制文本框内容到新的幻灯片
-                        new_shape = new_slide.shapes.add_textbox(shape.left, shape.top, shape.width, shape.height)
-                        new_shape.text_frame.text = shape.text_frame.text
-                else:  # 复制其他形状
-                    if shape.shape_type == 13:  # 图片
-                        # 复制图片
-                        img_stream = shape.image.blob
-                        new_slide.shapes.add_picture(img_stream, shape.left, shape.top, shape.width, shape.height)
-                    elif shape.shape_type == 1:  # 文本框
-                        new_shape = new_slide.shapes.add_textbox(shape.left, shape.top, shape.width, shape.height)
-                        new_shape.text_frame.text = shape.text_frame.text
-
-    # 保存合并后的 PowerPoint 文件
-    merged_ppt.save(output_file)
-    print(f'Merged presentation saved to {output_file}')
-
-# # 文件列表
-# ppt_files = ['1.pptx', '2.pptx']
-# # 合并后的文件
-# output_ppt = 'merged_presentation.pptx'
-# # 合并 PPTX 文件
-# merge_pptx(ppt_files, output_ppt)
-
-
+##########################################
 base_template_path = "ppt_templates"
 file_name_list = [
-    os.path.join(base_template_path, "all.pptx"),
+    os.path.join(base_template_path, "real_ppt1.pptx"),
     # os.path.join(base_template_path, "t1.pptx"),
     # os.path.join(base_template_path, "t2.pptx"),
     # os.path.join(base_template_path, "t3.pptx"),
 ]
 # 合并模板
-t = gen_new_template(file_name_list)
-t.save("1.pptx")
+compose_pptx_template(file_name_list, "1.pptx")
 
 # 定义要替换的占位符文本和替换内容
 placeholders_to_replace = [
@@ -163,9 +104,5 @@ placeholders_to_replace = [
     # },
 ]
 
-# 渲染合成过后的模板
-prs = Presentation("1.pptx")
-prs = gen_content(prs, placeholders_to_replace)
-prs.save("2.pptx")
-
-
+# 填入占位符文本
+fill_pptx_content(os.path.join("1.pptx"), "2.pptx", placeholders_to_replace)
