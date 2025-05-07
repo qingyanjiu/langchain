@@ -5,7 +5,7 @@ import docx
 import pypandoc
 
 dist_path = '/Users/louisliu/dev/AI_projects/langchain/长文本文案分段/split'
-para_max_size = 2048
+para_max_size = 20
 
 # docx转txt
 def convert_docx_to_text(file_path):
@@ -52,7 +52,7 @@ def do_split(all_files):
         content = get_doc_content(file_path_str)
 
         # 正则匹配一级标题
-        regex_lv1 = r"\n\d{1,2}\s*[\u4e00-\u9fa5]*\n"
+        regex_lv1 = r"\n\d{1,2}\s*[\u4e00-\u9fa5（）]*\n"
 
         all_para_list = []
         lv1_para_list = split_para(content, regex_lv1)
@@ -61,17 +61,19 @@ def do_split(all_files):
             # 切分二级标题
             if len(para_lv1) > para_max_size:
                 # 正则匹配2级标题
-                regex_lv2 = r"\n\d{1,2}.\d{1,2}\s*[\u4e00-\u9fa5]*\n"
+                regex_lv2 = r"\n\d{1,2}.\d{1,2}\s*[\u4e00-\u9fa5（）]*\n"
                 lv2_para_list = split_para(para_lv1, regex_lv2)
                 for para_lv2 in lv2_para_list:
                     # 切分三级标题
                     if len(para_lv2) > para_max_size:
                         # 正则匹配3级标题
-                        regex_lv3 = r"\n\d{1,2}.d{1,2}.\d{1,2}\s*[\u4e00-\u9fa5]*\n"
+                        regex_lv3 = r"\n\d{1,2}.d{1,2}.\d{1,2}\s*[\u4e00-\u9fa5（）]*\n"
                         lv3_para_list = split_para(para_lv2, regex_lv3)
-
-                        lv3_splited_content = '<*** DIVIDER ***>\n'.join(lv3_para_list)
-                        all_para_list.append(lv3_splited_content)
+                        if len(lv3_para_list) > 0:
+                            lv3_splited_content = '<*** DIVIDER ***>\n'.join(lv3_para_list)
+                            all_para_list.append(lv3_splited_content)
+                        else:
+                            all_para_list.append(para_lv2)
                     else:
                         all_para_list.append(para_lv2)
             
