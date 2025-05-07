@@ -62,7 +62,7 @@ def do_split(all_files):
             # 提取标题
             title_lv1 = para_lv1.split('\n')[1]
             para_lv1 = para_lv1.split(title_lv1)[-1]
-            full_title = f'{file_name_raw}-{title_lv1}\n'
+            full_title = f'{file_name_raw}-{title_lv1}\n------'
             
             # 切分二级标题
             if len(para_lv1) > para_max_size:
@@ -73,7 +73,7 @@ def do_split(all_files):
                     # 提取标题
                     title_lv2 = para_lv2.split('\n')[1]
                     para_lv2 = para_lv2.split(title_lv2)[-1]
-                    full_title = f'{file_name_raw}-{title_lv1}-{title_lv2}\n'
+                    full_title = f'{file_name_raw}-{title_lv1}-{title_lv2}\n------'
                     
                     # 切分三级标题
                     if len(para_lv2) > para_max_size:
