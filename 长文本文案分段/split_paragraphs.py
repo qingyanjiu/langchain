@@ -46,6 +46,7 @@ def get_doc_content(file_path):
 # 使用正则按照段落标题切分正片文章
 def do_split(all_files):
     for file_path in all_files:
+        file_name_raw = file_path.stem
         file_name = f'{file_path.stem}.txt'
         dist_file_path = os.path.join(dist_path, file_name)
         file_path_str = str(file_path)
@@ -58,27 +59,39 @@ def do_split(all_files):
         lv1_para_list = split_para(content, regex_lv1)
 
         for para_lv1 in lv1_para_list:
+            # 提取标题
+            title_lv1 = para_lv1.split('\n')[1]
+            para_lv1 = para_lv1.split(title_lv1)[-1]
+            full_title = f'{file_name_raw}-{title_lv1}\n'
+            
             # 切分二级标题
             if len(para_lv1) > para_max_size:
                 # 正则匹配2级标题
                 regex_lv2 = r"\n\d{1,2}.\d{1,2}\s*[\u4e00-\u9fa5（）]*\n"
                 lv2_para_list = split_para(para_lv1, regex_lv2)
                 for para_lv2 in lv2_para_list:
+                    # 提取标题
+                    title_lv2 = para_lv2.split('\n')[1]
+                    para_lv2 = para_lv2.split(title_lv2)[-1]
+                    full_title = f'{file_name_raw}-{title_lv1}-{title_lv2}\n'
+                    
                     # 切分三级标题
                     if len(para_lv2) > para_max_size:
                         # 正则匹配3级标题
                         regex_lv3 = r"\n\d{1,2}.d{1,2}.\d{1,2}\s*[\u4e00-\u9fa5（）]*\n"
                         lv3_para_list = split_para(para_lv2, regex_lv3)
+                        # 每一项前面加上title
+                        lv3_para_list = list(map(lambda x: f'{full_title}-{x}', lv3_para_list))
                         if len(lv3_para_list) > 0:
                             lv3_splited_content = '<*** DIVIDER ***>\n'.join(lv3_para_list)
                             all_para_list.append(lv3_splited_content)
                         else:
-                            all_para_list.append(para_lv2)
+                            all_para_list.append(f'{full_title}{para_lv2}')
                     else:
-                        all_para_list.append(para_lv2)
+                        all_para_list.append(f'{full_title}{para_lv2}')
             
             else:
-                all_para_list.append(para_lv1)
+                all_para_list.append(f'{full_title}{para_lv1}')
 
         splited_content = '<*** DIVIDER ***>\n'.join(all_para_list)
         # 替换掉重复的分隔符
