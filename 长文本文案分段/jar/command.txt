@@ -1,0 +1,3 @@
+#需要java17
+
+java -jar doc2txt.jar /Users/louisliu/dev/LLM/RAG_DOC_DIST /Users/louisliu/dev/LLM/RAG_DOC_DIST_TXT
