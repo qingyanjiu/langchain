@@ -1,4 +1,4 @@
-# pip install python-docx pypandoc -i https://pypi.tuna.tsinghua.edu.cn/simple
+# pip install python-docx pypandoc lanchain==0.3.19 langchain-openai==0.3.7 -i https://pypi.tuna.tsinghua.edu.cn/simple
 import asyncio
 from datetime import datetime
 import os

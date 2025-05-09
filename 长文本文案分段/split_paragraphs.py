@@ -1,3 +1,5 @@
+# pip install lanchain==0.3.19 langchain-openai==0.3.7 -i https://pypi.tuna.tsinghua.edu.cn/simple
+import asyncio
 import os
 from pathlib import Path
 import re
@@ -5,26 +7,28 @@ import shutil
 import subprocess
 import docx
 from langchain_openai import ChatOpenAI
+from langchain.prompts import PromptTemplate
 import pypandoc
 import json
 
 # 初始化 ChatOpenAI 实例 (在函数外部)
 OPENAI_API_KEY = 'hxkj2025'
-# llm = ChatOpenAI(model='deepseek',
-#             api_key=OPENAI_API_KEY,
-#             base_url='https://ai01.hpccube.com:65016/ai-forward/d90177765e5346e891bf019a18a16f3da0009000/v1',
-#             # base_url='https://ai111.hpccube.com:65062/ai-forward/83d4e0a0eee742e5a182cd43cae9dab9a0008000/v1',
-#             streaming=True,
-#             temperature=0,
-#             request_timeout=360,
-#             max_retries=0
-#             )
+llm = ChatOpenAI(model='deepseek',
+            api_key=OPENAI_API_KEY,
+            # base_url='https://ai01.hpccube.com:65016/ai-forward/d90177765e5346e891bf019a18a16f3da0009000/v1',
+            base_url='https://ai111.hpccube.com:65062/ai-forward/83d4e0a0eee742e5a182cd43cae9dab9a0008000/v1',
+            streaming=True,
+            temperature=0,
+            request_timeout=360,
+            max_retries=0
+            )
 
 split_path_str = '/Users/louisliu/dev/AI_projects/langchain/长文本文案分段/split'
-para_max_size = 20
+PARA_MAX_SIZE = 20
 
 MAIN_DIVIDER = '<*** DIVIDER ***>'
 SUB_DIVIDER = '\n------\n'
+
 
 ''' 
 第一种标题分割格式正则（共分割三级标题）
@@ -33,8 +37,8 @@ SUB_DIVIDER = '\n------\n'
 1.1.1 xx
 '''
 title_regex_1 = [
-    r"\n\d{1,2}[\.\s]*[\u4e00-\u9fa5（）]*.*?\n", 
-    r"\n\d{1,2}\.\d{1,2}\s*[\u4e00-\u9fa5（）]*.*?\n", 
+    r"\n\d{1,2}[\.\s]*[\u4e00-\u9fa5（）]*?\n", 
+    r"\n\d{1,2}\.\d{1,2}\s*[\u4e00-\u9fa5（）]*?\n", 
     r"\n\d{1,2}\.\d{1,2}\.\d{1,2}\s*.*?[。\n]"
 ]
 ''' 
@@ -49,7 +53,7 @@ title_regex_2 = [
     r'\n\d{1,2}[\.\s]*[\u4e00-\u9fa5（）]*.*?[。；\n]'
 ]
 
-def llm_gen_input(text):
+async def llm_replace_input(data, semaphore):
     template = '''
         你是一个经验丰富的文案工作者，现在需要将一些方案的标题和段落信息进行重新编辑，以下是一些例子：
         
@@ -62,10 +66,20 @@ def llm_gen_input(text):
         编辑后内容： 请为《太原市安全生产事故灾难应急预案》编写其中某个段落的内容。段落的标题是“责任追究”，主要描述的是"保障措施"中"奖励与责任追究"中工作原则的相关内容。
         
         例子3：
-        原内容：太原市安全生产事故灾难应急预案-6保障措施-6.5奖励与责任追究-6.5.2责任追究
-        编辑后内容： 请为《太原市安全生产事故灾难应急预案》编写其中某个段落的内容。段落的标题是“责任追究”，主要描述的是"保障措施"中"奖励与责任追究"中工作原则的相关内容。
-        
+        原内容：河北省城市排水防涝应急预案-二、组织指挥体系及职责-（一）省住房城乡建设厅组织指挥体系-2.工作职责
+        编辑后内容： 请为《河北省城市排水防涝应急预案》编写其中某个段落的内容。段落的标题是“工作职责”，主要描述的是"组织指挥体系及职责"中"省住房城乡建设厅组织指挥体系"中工作职责的相关内容。
+
+        需要编辑的内容: 
+        {text}
     '''
+    prompt = PromptTemplate.from_template(template) 
+    async with semaphore:
+        meessage = prompt.format(text=data['input'])
+        response = await llm.ainvoke(meessage)
+        resp = response.content
+        resp = resp.split('</think>')[-1]
+        # 替换input
+        data['input'] = resp
 
 # docx转txt
 def convert_docx_to_text(file_path):
@@ -136,9 +150,20 @@ def do_split(all_files, lv_1_3_regex):
         content = content.replace("\ue004", "")\
             .replace("\ue010",'')\
             .replace("\u3000",'')\
+            .replace("\u2003",'')\
             .replace('．', '.')\
             .replace('：', '')
-
+        # 删除附件内容
+        fj_regex = r"\n.*附件"
+        fj_matches = re.finditer(fj_regex, content, re.MULTILINE)
+        try:
+            first_match = next(fj_matches)
+            if first_match:
+                start_idx = first_match.start()
+                content = content[:start_idx + 1]
+        except StopIteration:
+            print(f'{file_name_raw} 中没有附件内容')
+            
         # 正则匹配一级标题
         regex_lv1 = lv_1_3_regex[0]
 
@@ -146,7 +171,7 @@ def do_split(all_files, lv_1_3_regex):
         lv1_para_list = split_para(content, regex_lv1)
 
         for para_lv1 in lv1_para_list:
-            if len(para_lv1['content']) < 200:
+            if len(para_lv1['content'].replace('\n', '')) < 20:
                 continue
             # 提取标题
             title_lv1 = para_lv1['title']
@@ -154,7 +179,7 @@ def do_split(all_files, lv_1_3_regex):
             full_title = f'{file_name_raw}-{title_lv1}{SUB_DIVIDER}'
             
             # 切分二级标题
-            if len(para_lv1) > para_max_size:
+            if len(para_lv1) > PARA_MAX_SIZE:
                 # 正则匹配2级标题
                 regex_lv2 = lv_1_3_regex[1]
                 lv2_para_list = split_para(para_lv1, regex_lv2)
@@ -165,7 +190,7 @@ def do_split(all_files, lv_1_3_regex):
                     full_title = f'{file_name_raw}-{title_lv1}-{title_lv2}{SUB_DIVIDER}'
                     
                     # 切分三级标题
-                    if len(para_lv2) > para_max_size:
+                    if len(para_lv2) > PARA_MAX_SIZE:
                         # 正则匹配3级标题
                         regex_lv3 = lv_1_3_regex[2]
                         lv3_para_list = split_para(para_lv2, regex_lv3)
@@ -236,12 +261,22 @@ def split_data_to_json(split_data_path):
                 if p:
                     title = p.split(SUB_DIVIDER)[0]
                     content = p.split(SUB_DIVIDER)[1]
-                    if len(content) > 10:
+                    # 判断下长度，大体上把目录内容过滤掉
+                    if len(content) > 20:
                         content = content.replace('\n', '')
                         data_item = {"input": title, "output": content}
                         result.append(data_item)
-    with open('data.json', 'w', encoding='utf-8') as json_file:
-        json_file.write(json.dumps(result, ensure_ascii=False)) 
+    return result
+
+# 异步并行处理数据
+async def do_llm_replace_title(json_object):
+    semaphore = asyncio.Semaphore(50)
+    tasks = []
+    for j in json_object:
+        task = asyncio.create_task(llm_replace_input(j, semaphore))
+        tasks.append(task)
+    await asyncio.gather(*tasks)
+
 
 if __name__ == "__main__":
     
@@ -283,5 +318,9 @@ if __name__ == "__main__":
     do_split(txt_files, title_regex_2)
     
     # 生成json数据文件
-    split_data_to_json(split_path_str)
+    json_object = split_data_to_json(split_path_str)
+    # 并发处理input格式
+    # asyncio.run(do_llm_replace_title(json_object))
+    with open('data.json', 'w', encoding='utf-8') as json_file:
+        json_file.write(json.dumps(json_object, ensure_ascii=False))
     
