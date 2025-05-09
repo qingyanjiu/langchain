@@ -25,7 +25,7 @@ overlap = 0
 OPENAI_API_KEY = 'hxkj2025'
 llm = ChatOpenAI(model='deepseek',
             api_key=OPENAI_API_KEY,
-            base_url='https://ai01.hpccube.com:65016/ai-forward/d90177765e5346e891bf019a18a16f3da0008080/v1',
+            base_url='https://ai01.hpccube.com:65016/ai-forward/d90177765e5346e891bf019a18a16f3da0009000/v1',
             # base_url='https://ai111.hpccube.com:65062/ai-forward/83d4e0a0eee742e5a182cd43cae9dab9a0008000/v1',
             streaming=is_streaming,
             temperature=0,
