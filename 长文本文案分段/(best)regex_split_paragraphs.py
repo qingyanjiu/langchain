@@ -20,11 +20,11 @@ import json
 OPENAI_API_KEY = 'hxkj2025'
 llm = ChatOpenAI(model='deepseek',
             api_key=OPENAI_API_KEY,
-            # base_url='https://ai01.hpccube.com:65016/ai-forward/d90177765e5346e891bf019a18a16f3da0009000/v1',
-            base_url='https://ai111.hpccube.com:65062/ai-forward/83d4e0a0eee742e5a182cd43cae9dab9a0008000/v1',
+            base_url='https://ai01.hpccube.com:65016/ai-forward/d90177765e5346e891bf019a18a16f3da0009000/v1',
+            # base_url='https://ai111.hpccube.com:65062/ai-forward/83d4e0a0eee742e5a182cd43cae9dab9a0008000/v1',
             streaming=True,
             temperature=0,
-            request_timeout=3600000,
+            request_timeout=3600,
             max_retries=0
             )
 
@@ -35,7 +35,7 @@ MAIN_DIVIDER = '<*** DIVIDER ***>'
 SUB_DIVIDER = '\n------\n'
 
 # 大模型批量处理的并行线程数
-MAX_LLM_PROCESS_SEMAPHORE = 100
+MAX_LLM_PROCESS_SEMAPHORE = 50
 
 ''' 
 第一种标题分割格式正则（共分割三级标题）
@@ -78,6 +78,8 @@ async def llm_replace_input(data, tmp_save_obj, semaphore):
 
         需要编辑的内容: 
         {text}
+        
+        请注意：返回的结果中不要包含“编辑后内容”这种文字，直接返回结果即可。
     '''
     prompt = PromptTemplate.from_template(template) 
     async with semaphore:
@@ -314,10 +316,10 @@ def post_process_with_llm(json_object_to_save):
     if os.path.exists('data-tmp.json'):
         with open('data-tmp.json', 'r', encoding='utf-8') as json_file:
             tmp_save_obj = json.loads(json_file.read())
-        # 已暂存的数据的key
-        tmp_obj_keys = [item['input'] for item in tmp_save_obj]
-        # 未暂存的数据列表，也就是要继续处理的数据
-        json_object_to_save = [item for item in json_object_to_save if item['input'] not in tmp_obj_keys]
+        # 已处理的条数
+        processed_count = len(tmp_save_obj)
+        # 未暂存的数据列表，也就是要继续处理的数据，从已处理的条数下标开始往后继续处理
+        json_object_to_save = json_object_to_save[processed_count:]
         print(f'临时存储文件存在，读取数据，继续处理剩余数据,剩余 {len(json_object_to_save)} 条')
     else:
         print(f'临时存储文件不存在，处理所有数据, 共 {len(json_object_to_save)} 条')
@@ -358,8 +360,8 @@ if __name__ == "__main__":
     txt_path = Path(txt_path_str)
     txt_files = list(txt_path.rglob('*.txt'))
     # 使用两套不同的标题正则，处理转好的txt文件 
-    # do_split(txt_files, title_regex_1)
-    # do_split(txt_files, title_regex_2)
+    do_split(txt_files, title_regex_1)
+    do_split(txt_files, title_regex_2)
     
     # 生成json数据文件
     json_object_to_save = split_data_to_json(split_path_str)
