@@ -1,4 +1,4 @@
-# pip install python-docx pypandoc -i https://pypi.tuna.tsinghua.edu.cn/simple
+# pip install python-docx pypandoc lanchain==0.3.19 langchain-openai==0.3.7 -i https://pypi.tuna.tsinghua.edu.cn/simple
 import asyncio
 from datetime import datetime
 import os
@@ -11,20 +11,45 @@ import pypandoc
 from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
 
+'''
+将文档切分后交给ai处理分段，再拼起来（效果很差）
+切分后已经成了碎片化，再处理后拼接，都是不完整的段落，效果很差
+'''
+
 # 全局设置是否流式处理
 is_streaming = True
+
+# 分段长度
+chank_size = 2000
+# 重叠长度
+overlap = 0
 
 # 初始化 ChatOpenAI 实例 (在函数外部)
 OPENAI_API_KEY = 'hxkj2025'
 llm = ChatOpenAI(model='deepseek',
             api_key=OPENAI_API_KEY,
-            # base_url='https://ai01.hpccube.com:65016/ai-forward/d90177765e5346e891bf019a18a16f3da0008000/v1',
-            base_url='https://ai111.hpccube.com:65062/ai-forward/83d4e0a0eee742e5a182cd43cae9dab9a0008000/v1',
+            base_url='https://ai01.hpccube.com:65016/ai-forward/d90177765e5346e891bf019a18a16f3da0009000/v1',
+            # base_url='https://ai111.hpccube.com:65062/ai-forward/83d4e0a0eee742e5a182cd43cae9dab9a0008000/v1',
             streaming=is_streaming,
             temperature=0,
             request_timeout=3600,
             max_retries=0
             )
+
+# 切分文档为一个个chank列表
+def split_content_to_chanks(content: str) -> list:
+    import math
+    chanks = []
+    chunk_num = math.ceil(len(content) / (chank_size - overlap))
+    assert chank_size > overlap, '重叠长度不能大于分段大小!'
+    for i in range(0, chunk_num):
+        start_index = i * chank_size - overlap if i > 0 else 0
+        end_index = start_index + chank_size
+        # 左闭右开，+1
+        text = content[start_index : end_index + 1]
+        chanks.append(text)
+    return chanks
+    
 
 # docx转txt
 def convert_docx_to_text(file_path):
@@ -67,7 +92,7 @@ async def llm_data_process_streaming(prompt):
     response = ''
     try:
         # 打印请求消息，确保消息正确
-        print(f"Sending streaming request: {prompt[:100]}...")  # 输出前100字符作为调试
+        # print(f"Sending streaming request: {prompt[:100]}...")
         # 启用流式传输
         processed_chunks = llm.astream(prompt)
         async for chunk in processed_chunks:
@@ -103,12 +128,14 @@ async def do_llm_clean(text, think_tag = 'think'):
     你是一个文档结构化专家，请将提供的文档结构化为所描述的形式。
     直接获取原本文档中的内容进行结构化，每一段内容均以<####>隔开，不要自行添加其他内容。
     生成完毕后请反复检查，确认不要包含“目录”相关的结果返回。
-    生成完毕后请反复检查，确认不要包含“附录”相关的结果返回。
+    注意：
+    - 标题只需要最多3级，内容会包含最多3级标题以下的所有下级标题及文本内容。
+    - 每一个分段不要漏掉标题层级，如果当前是3级标题，那么1级和2级标题页要包含在内。
     
+
     以下是一个例子：
     结构化前：
 
-    1文档内容：
     1总则
     1.1编制依据
     依据《中华人民共和国突发事件应对法》《国家突发事件总体应急预案》《北京市实施＜中华人民共和国突发事件应对法＞办法》《北京市突发事件总体应急预案》等有关法律法规文件，以及本区突发事件应对工作实际，制定本预案。
@@ -123,22 +150,17 @@ async def do_llm_clean(text, think_tag = 'think'):
     (2)事故灾难。
 
     结构化后：
-    标题1：总则
-    标题2：编制依据
+    标题：1.总则 1.1 编制依据
     内容：依据《中华人民共和国突发事件应对法》《国家突发事件总体应急预案》《北京市实施＜中华人民共和国突发事件应对法＞办法》《北京市突发事件总体应急预案》等有关法律法规文件，以及本区突发事件应对工作实际，制定本预案。
     <####>
-    标题1：总则
-    标题2：适用范围
+    标题：1.总则 1.2 适用范围
     内容：本预案主要用于指导预防和处置发生在昌平区行政区域内，或发生在其他地区涉及昌平区的，应由昌平区处置或参与处置的各类突发事件。
     本预案所称突发事件是指突然发生，造成或可能造成严重社会危害，需要采取应急处置措施予以应对的自然灾害、事故灾难、公共卫生事件和社会安全事件。
     <####>
-    标题1：总则
-    标题2：工作原则
+    标题：1.总则 1.3 工作原则
     内容：坚持人民至上、生命至上。提高防范意识，有效控制危机，力争实现早发现、早报告、早控制、早解决，将突发事件造成的损失减少到最低程度。
     <####>
-    标题1：总则
-    标题2：工作原则
-    标题3：突发事件分类分级
+    标题：1.总则 1.4 突发事件分类分级 1.4.1 本区突发事件主要包括以下类别:
     内容：(1)自然灾害。
     (2)事故灾难。
 
@@ -176,14 +198,23 @@ async def process_file(file_path, semaphore, is_streaming=True):
     async with semaphore:  # 限制并发量
         print(f"Task {file_path.name} acquired semaphore (value: {semaphore._value})")
         try:
-            content = await get_doc_content(file_path=file_path_str)
             # 如果文件不存在，才进行处理。处理过的文件就不处理了
             if(not os.path.exists(dist_file_path)):
-                # 大模型处理文本信息
+                content = await get_doc_content(file_path=file_path_str)
                 # 文本不能太短，太短说明有问题，跳过
                 if (len(content) > 100):
-                    # content = content[:100]
-                    processed_content = await do_llm_clean(content)
+                    # 文章内容分段
+                    chanks = split_content_to_chanks(content)
+                    cleaned_chanks = []
+                    for chank in chanks:
+                        # 大模型处理文本信息
+                        cleaned_chank = await do_llm_clean(chank)
+                        cleaned_chanks.append(cleaned_chank)
+                        print(f'分段:{cleaned_chank}')
+                        print('*'*10)
+                        
+                    # 所有处理过的chank组合成字符串
+                    processed_content = '\n'.join(cleaned_chanks)
                     if len(processed_content) > 100:
                         async with aiofiles.open(dist_file_path, 'w', encoding='utf-8') as f:
                             await f.write(processed_content)
@@ -218,7 +249,7 @@ async def batch_process_files(file_paths, max_concurrency=10):
 # 启动执行任务 支持重试
 def retry_run(file_paths):
     # 设置并发参数
-    MAX_CONCURRENT = 2
+    MAX_CONCURRENT = 1
     # 根据系统资源调整
     success_count, total_count = asyncio.run(batch_process_files(file_paths, MAX_CONCURRENT))    
     # # 如果没跑完，等待一分钟后重试

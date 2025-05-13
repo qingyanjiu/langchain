@@ -11,6 +11,11 @@ from langchain.prompts import PromptTemplate
 import pypandoc
 import json
 
+'''
+通过正则表达式分段，然后用llm处理input
+对于固定标题的文档来说，这种方式效率最高，分段后上下文变少了，交给大模型处理也比较合理
+'''
+
 # 初始化 ChatOpenAI 实例 (在函数外部)
 OPENAI_API_KEY = 'hxkj2025'
 llm = ChatOpenAI(model='deepseek',
@@ -19,7 +24,7 @@ llm = ChatOpenAI(model='deepseek',
             base_url='https://ai111.hpccube.com:65062/ai-forward/83d4e0a0eee742e5a182cd43cae9dab9a0008000/v1',
             streaming=True,
             temperature=0,
-            request_timeout=360,
+            request_timeout=3600000,
             max_retries=0
             )
 
@@ -29,6 +34,8 @@ PARA_MAX_SIZE = 20
 MAIN_DIVIDER = '<*** DIVIDER ***>'
 SUB_DIVIDER = '\n------\n'
 
+# 大模型批量处理的并行线程数
+MAX_LLM_PROCESS_SEMAPHORE = 100
 
 ''' 
 第一种标题分割格式正则（共分割三级标题）
@@ -53,7 +60,7 @@ title_regex_2 = [
     r'\n\d{1,2}[\.\s]*[\u4e00-\u9fa5（）]*.*?[。；\n]'
 ]
 
-async def llm_replace_input(data, semaphore):
+async def llm_replace_input(data, tmp_save_obj, semaphore):
     template = '''
         你是一个经验丰富的文案工作者，现在需要将一些方案的标题和段落信息进行重新编辑，以下是一些例子：
         
@@ -80,6 +87,8 @@ async def llm_replace_input(data, semaphore):
         resp = resp.split('</think>')[-1]
         # 替换input
         data['input'] = resp
+        tmp_save_obj.append(data)
+            
 
 # docx转txt
 def convert_docx_to_text(file_path):
@@ -269,13 +278,62 @@ def split_data_to_json(split_data_path):
     return result
 
 # 异步并行处理数据
-async def do_llm_replace_title(json_object):
-    semaphore = asyncio.Semaphore(50)
+async def do_llm_replace_title(json_object, tmp_save_obj):
+    semaphore = asyncio.Semaphore(MAX_LLM_PROCESS_SEMAPHORE)
     tasks = []
     for j in json_object:
-        task = asyncio.create_task(llm_replace_input(j, semaphore))
+        task = asyncio.create_task(llm_replace_input(j, tmp_save_obj, semaphore))
         tasks.append(task)
     await asyncio.gather(*tasks)
+
+# java将doc转为txt
+def process_file_with_java(all_files, jar_path, doc_path_str, txt_path_str):
+    ########### 预处理文件列表 #############
+    # 文件复制到某个目录下
+    for file in all_files:
+        dist_path_str = os.path.join(doc_path_str, f'{file.name}')
+        shutil.copy2(str(file), dist_path_str)
+        
+    # java 去将 RAG_DOC_DIST 目录下doc转为 txt 放到 RAG_DOC_DIST_TXT下
+    args = [doc_path_str, txt_path_str]
+    command = [
+        'java',
+        '-jar',
+        jar_path,
+        *args
+    ]
+    process = subprocess.run(command, capture_output=True, text=True, check=True)
+    print(process.stderr)
+
+# 使用大模型处理分段后生成的json文件中的部分内容
+def post_process_with_llm(json_object_to_save):
+    # 暂存的obj，防止中途出错数据全丢，暂时记录处理完的数据，如果报错，就写这个数据
+    tmp_save_obj = []
+    
+    # 找临时存储的文件，如果存在，则读取其中内容，过滤掉已经有的数据
+    if os.path.exists('data-tmp.json'):
+        with open('data-tmp.json', 'r', encoding='utf-8') as json_file:
+            tmp_save_obj = json.loads(json_file.read())
+        # 已暂存的数据的key
+        tmp_obj_keys = [item['input'] for item in tmp_save_obj]
+        # 未暂存的数据列表，也就是要继续处理的数据
+        json_object_to_save = [item for item in json_object_to_save if item['input'] not in tmp_obj_keys]
+        print(f'临时存储文件存在，读取数据，继续处理剩余数据,剩余 {len(json_object_to_save)} 条')
+    else:
+        print(f'临时存储文件不存在，处理所有数据, 共 {len(json_object_to_save)} 条')
+    
+    # 通过LLM并发处理input格式
+    try:
+        asyncio.run(do_llm_replace_title(json_object_to_save, tmp_save_obj))
+    except Exception as e:
+        # 如果抛异常，则写入临时数据文件
+        if len(tmp_save_obj) > 0:
+            with open('data-tmp.json', 'w', encoding='utf-8') as json_file:
+                json_file.write(json.dumps(tmp_save_obj, ensure_ascii=False))
+            
+    # 如果有暂存的数据，和处理好的数据一起写入
+    if len(tmp_save_obj) > 0: 
+        json_object_to_save.extend(tmp_save_obj)
 
 
 if __name__ == "__main__":
@@ -291,36 +349,30 @@ if __name__ == "__main__":
     doc_path_str = '/Users/louisliu/dev/LLM/RAG_DOC_DIST'
     # java提取后的txt存到这里
     txt_path_str = '/Users/louisliu/dev/LLM/RAG_DOC_DIST_TXT'
+    # jar包路径
+    jar_path = '/Users/louisliu/dev/AI_projects/langchain/长文本文案分段/jar/doc2txt.jar'
     
-    ########### 预处理文件列表 #############
-    ## 文件复制到某个目录下
-    # for file in all_files:
-    #     dist_path_str = os.path.join(doc_path_str, f'{file.name}')
-    #     shutil.copy2(str(file), dist_path_str)
-        
-    # # java 去将 RAG_DOC_DIST 目录下doc转为 txt 放到 RAG_DOC_DIST_TXT下
-    # jar_path = '/Users/louisliu/dev/AI_projects/langchain/长文本文案分段/jar/doc2txt.jar'
-    # args = [doc_path_str, txt_path_str]
-    # command = [
-    #     'java',
-    #     '-jar',
-    #     jar_path,
-    #     *args
-    # ]
-    # process = subprocess.run(command, capture_output=True, text=True, check=True)
-    # print(process.stderr)
-    ########### 预处理文件列表 #############
+    # java提取doc内容，转为txt保存
+    # process_file_with_java(all_files, jar_path, doc_path_str, txt_path_str)
     
     txt_path = Path(txt_path_str)
     txt_files = list(txt_path.rglob('*.txt'))
     # 使用两套不同的标题正则，处理转好的txt文件 
-    do_split(txt_files, title_regex_1)
-    do_split(txt_files, title_regex_2)
+    # do_split(txt_files, title_regex_1)
+    # do_split(txt_files, title_regex_2)
     
     # 生成json数据文件
-    json_object = split_data_to_json(split_path_str)
-    # 并发处理input格式
-    # asyncio.run(do_llm_replace_title(json_object))
-    with open('data.json', 'w', encoding='utf-8') as json_file:
-        json_file.write(json.dumps(json_object, ensure_ascii=False))
+    json_object_to_save = split_data_to_json(split_path_str)
     
+    # 使用大模型处理分段后生成的json文件中的部分内容
+    post_process_with_llm(json_object_to_save)
+    
+    with open('data.json', 'w', encoding='utf-8') as json_file:
+        json_file.write(json.dumps(json_object_to_save, ensure_ascii=False))
+    
+    # 删除生成的json文件中的<think>内容
+    with open('data.json', 'r', encoding='utf-8') as json_file:
+        obj = json.loads(json_file.read())
+        obj = [item for item in obj if item['input'].find('<think>') == -1]
+        with open('data-final.json', 'w', encoding='utf-8') as f:
+            f.write(json.dumps(obj, ensure_ascii=False))
