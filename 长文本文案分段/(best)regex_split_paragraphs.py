@@ -24,18 +24,24 @@ llm = ChatOpenAI(model='deepseek',
             # base_url='https://ai111.hpccube.com:65062/ai-forward/83d4e0a0eee742e5a182cd43cae9dab9a0008000/v1',
             streaming=True,
             temperature=0,
-            request_timeout=3600,
+            request_timeout=120,
             max_retries=0
             )
 
 split_path_str = '/Users/louisliu/dev/AI_projects/langchain/长文本文案分段/split'
-PARA_MAX_SIZE = 20
+PARA_MAX_SIZE = 20480
 
 MAIN_DIVIDER = '<*** DIVIDER ***>'
 SUB_DIVIDER = '\n------\n'
 
 # 大模型批量处理的并行线程数
-MAX_LLM_PROCESS_SEMAPHORE = 50
+MAX_LLM_PROCESS_SEMAPHORE = 2
+
+# 目录过滤，长度不够这个数认为是目录，删掉
+INDEX_LEN_LIMIT = 100
+
+# 已经处理了多少条数据
+processed_count = 0
 
 ''' 
 第一种标题分割格式正则（共分割三级标题）
@@ -60,36 +66,59 @@ title_regex_2 = [
     r'\n\d{1,2}[\.\s]*[\u4e00-\u9fa5（）]*.*?[。；\n]'
 ]
 
-async def llm_replace_input(data, tmp_save_obj, semaphore):
+# 通过大模型用给定的实例文本内容生成思考内容（也就是让大模型去分析一下这段文字怎么写最合适，要注意哪些点。这个内容最后放到think里去训练）
+async def llm_gen_think_content(data, tmp_save_obj, semaphore):
     template = '''
-        你是一个经验丰富的文案工作者，现在需要将一些方案的标题和段落信息进行重新编辑，以下是一些例子：
+        你是一个方案写作专家，很擅长分析方案中段落内部的逻辑。
+        以下是一篇名为《{title}》下名为“{para_title}”段落的内容，请分析一下该段落内容写作时要注意的点，给出指导意见，说明如何才能写好本段落的内容。
+        请注意：直接返回指导意见，不要包含其他描述性的内容。
         
-        例子1：
-        原内容：太原市交通运输突发事件应急预案-1.总则-1.3 工作原则
-        编辑后内容： 请为《太原市交通运输突发事件应急预案》编写其中某个段落的内容。段落的标题是“工作原则”，主要描述的是"方案总则"中工作原则的相关内容。
-        
-        例子2：
-        原内容：太原市安全生产事故灾难应急预案-6保障措施-6.5奖励与责任追究-6.5.2责任追究
-        编辑后内容： 请为《太原市安全生产事故灾难应急预案》编写其中某个段落的内容。段落的标题是“责任追究”，主要描述的是"保障措施"中"奖励与责任追究"中工作原则的相关内容。
-        
-        例子3：
-        原内容：河北省城市排水防涝应急预案-二、组织指挥体系及职责-（一）省住房城乡建设厅组织指挥体系-2.工作职责
-        编辑后内容： 请为《河北省城市排水防涝应急预案》编写其中某个段落的内容。段落的标题是“工作职责”，主要描述的是"组织指挥体系及职责"中"省住房城乡建设厅组织指挥体系"中工作职责的相关内容。
-
-        需要编辑的内容: 
+        段落内容如下：
         {text}
-        
-        请注意：返回的结果中不要包含“编辑后内容”这种文字，直接返回结果即可。
     '''
     prompt = PromptTemplate.from_template(template) 
     async with semaphore:
-        meessage = prompt.format(text=data['input'])
+        meessage = prompt.format(text=data['output'], title=data['title'], para_title=data['input'])
         response = await llm.ainvoke(meessage)
         resp = response.content
         resp = resp.split('</think>')[-1]
         # 替换input
-        data['input'] = resp
+        data['think'] = resp
         tmp_save_obj.append(data)
+        processed_count += 1
+        print(f'***** 已处理 {processed_count} 条数据 *****')
+        
+
+# async def llm_replace_input(data, tmp_save_obj, semaphore):
+#     template = '''
+#         你是一个经验丰富的文案工作者，现在需要将一些方案的标题和段落信息进行重新编辑，以下是一些例子：
+        
+#         例子1：
+#         原内容：太原市交通运输突发事件应急预案-1.总则-1.3 工作原则
+#         编辑后内容： 请为《太原市交通运输突发事件应急预案》编写其中某个段落的内容。段落的标题是“工作原则”，主要描述的是"方案总则"中工作原则的相关内容。
+        
+#         例子2：
+#         原内容：太原市安全生产事故灾难应急预案-6保障措施-6.5奖励与责任追究-6.5.2责任追究
+#         编辑后内容： 请为《太原市安全生产事故灾难应急预案》编写其中某个段落的内容。段落的标题是“责任追究”，主要描述的是"保障措施"中"奖励与责任追究"中工作原则的相关内容。
+        
+#         例子3：
+#         原内容：河北省城市排水防涝应急预案-二、组织指挥体系及职责-（一）省住房城乡建设厅组织指挥体系-2.工作职责
+#         编辑后内容： 请为《河北省城市排水防涝应急预案》编写其中某个段落的内容。段落的标题是“工作职责”，主要描述的是"组织指挥体系及职责"中"省住房城乡建设厅组织指挥体系"中工作职责的相关内容。
+
+#         需要编辑的内容: 
+#         {text}
+        
+#         请注意：返回的结果中不要包含“编辑后内容”这种文字，直接返回结果即可。
+#     '''
+#     prompt = PromptTemplate.from_template(template) 
+#     async with semaphore:
+#         meessage = prompt.format(text=data['input'])
+#         response = await llm.ainvoke(meessage)
+#         resp = response.content
+#         resp = resp.split('</think>')[-1]
+#         # 替换input
+#         data['input'] = resp
+#         tmp_save_obj.append(data)
             
 
 # docx转txt
@@ -182,12 +211,12 @@ def do_split(all_files, lv_1_3_regex):
         lv1_para_list = split_para(content, regex_lv1)
 
         for para_lv1 in lv1_para_list:
-            if len(para_lv1['content'].replace('\n', '')) < 20:
+            if len(para_lv1['content'].replace('\n', '')) < INDEX_LEN_LIMIT:
                 continue
             # 提取标题
             title_lv1 = para_lv1['title']
             para_lv1 = para_lv1['content'].replace(para_lv1['title'], '')
-            full_title = f'{file_name_raw}-{title_lv1}{SUB_DIVIDER}'
+            full_title = f'{file_name_raw}|{title_lv1}{SUB_DIVIDER}'
             
             # 切分二级标题
             if len(para_lv1) > PARA_MAX_SIZE:
@@ -198,7 +227,7 @@ def do_split(all_files, lv_1_3_regex):
                     # 提取标题
                     title_lv2 = para_lv2['title']
                     para_lv2 = para_lv2['content'].replace(para_lv2['title'], '')
-                    full_title = f'{file_name_raw}-{title_lv1}-{title_lv2}{SUB_DIVIDER}'
+                    full_title = f'{file_name_raw}|{title_lv1}-{title_lv2}{SUB_DIVIDER}'
                     
                     # 切分三级标题
                     if len(para_lv2) > PARA_MAX_SIZE:
@@ -213,7 +242,7 @@ def do_split(all_files, lv_1_3_regex):
                                 # 提取标题
                                 title_lv3 = para_lv3['title']
                                 para_lv3 = para_lv3['content'].replace(para_lv3['title'], '')
-                                full_title = f'{file_name_raw}-{title_lv1}-{title_lv2}-{title_lv3}{SUB_DIVIDER}'
+                                full_title = f'{file_name_raw}|{title_lv1}-{title_lv2}-{title_lv3}{SUB_DIVIDER}'
                             
                                 lv3_content = f'{MAIN_DIVIDER}\n{full_title}{para_lv3}'
                                 all_para_list.append(lv3_content)
@@ -271,11 +300,15 @@ def split_data_to_json(split_data_path):
             for p in paras:
                 if p:
                     title = p.split(SUB_DIVIDER)[0]
+                    # 段落标题
+                    para_title = title.split('|')[1].replace('\n', '')
+                    # 文档标题
+                    title = title.split('|')[0].replace('\n', '')
                     content = p.split(SUB_DIVIDER)[1]
                     # 判断下长度，大体上把目录内容过滤掉
-                    if len(content) > 20:
+                    if len(content) > INDEX_LEN_LIMIT:
                         content = content.replace('\n', '')
-                        data_item = {"input": title, "output": content}
+                        data_item = {"title": title, "input": para_title, "output": content}
                         result.append(data_item)
     return result
 
@@ -284,7 +317,7 @@ async def do_llm_replace_title(json_object, tmp_save_obj):
     semaphore = asyncio.Semaphore(MAX_LLM_PROCESS_SEMAPHORE)
     tasks = []
     for j in json_object:
-        task = asyncio.create_task(llm_replace_input(j, tmp_save_obj, semaphore))
+        task = asyncio.create_task(llm_gen_think_content(j, tmp_save_obj, semaphore))
         tasks.append(task)
     await asyncio.gather(*tasks)
 
@@ -330,6 +363,7 @@ def post_process_with_llm(json_object_to_save):
     except Exception as e:
         # 如果抛异常，则写入临时数据文件
         if len(tmp_save_obj) > 0:
+            print(f"发生错误: {e} 暂存已处理的 {len(tmp_save_obj)} 条数据")
             with open('data-tmp.json', 'w', encoding='utf-8') as json_file:
                 json_file.write(json.dumps(tmp_save_obj, ensure_ascii=False))
             
@@ -370,11 +404,11 @@ if __name__ == "__main__":
     post_process_with_llm(json_object_to_save)
     
     with open('data.json', 'w', encoding='utf-8') as json_file:
-        json_file.write(json.dumps(json_object_to_save, ensure_ascii=False))
+        json_file.write(json.dumps(json_object_to_save, ensure_ascii=False, indent=2))
     
     # 删除生成的json文件中的<think>内容
     with open('data.json', 'r', encoding='utf-8') as json_file:
         obj = json.loads(json_file.read())
         obj = [item for item in obj if item['input'].find('<think>') == -1]
         with open('data-final.json', 'w', encoding='utf-8') as f:
-            f.write(json.dumps(obj, ensure_ascii=False))
+            f.write(json.dumps(obj, ensure_ascii=False, indent=2))
