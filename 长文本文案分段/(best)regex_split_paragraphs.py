@@ -20,8 +20,8 @@ import json
 OPENAI_API_KEY = 'hxkj2025'
 llm = ChatOpenAI(model='deepseek',
             api_key=OPENAI_API_KEY,
-            base_url='https://ai01.hpccube.com:65016/ai-forward/d90177765e5346e891bf019a18a16f3da0009000/v1',
-            # base_url='https://ai111.hpccube.com:65062/ai-forward/83d4e0a0eee742e5a182cd43cae9dab9a0008000/v1',
+            # base_url='https://ai01.hpccube.com:65016/ai-forward/d90177765e5346e891bf019a18a16f3da0009000/v1',
+            base_url='https://ai111.hpccube.com:65062/ai-forward/83d4e0a0eee742e5a182cd43cae9dab9a0008000/v1',
             streaming=True,
             temperature=0,
             request_timeout=120,
@@ -29,17 +29,19 @@ llm = ChatOpenAI(model='deepseek',
             )
 
 split_path_str = '/Users/louisliu/dev/AI_projects/langchain/长文本文案分段/split'
-PARA_MAX_SIZE = 20480
+PARA_MAX_SIZE = 20
 
 MAIN_DIVIDER = '<*** DIVIDER ***>'
 SUB_DIVIDER = '\n------\n'
 
 # 大模型批量处理的并行线程数
-MAX_LLM_PROCESS_SEMAPHORE = 2
+MAX_LLM_PROCESS_SEMAPHORE = 10
 
 # 目录过滤，长度不够这个数认为是目录，删掉
 INDEX_LEN_LIMIT = 100
 
+# 一共有多少数据
+total_count = 0
 # 已经处理了多少条数据
 processed_count = 0
 
@@ -68,6 +70,7 @@ title_regex_2 = [
 
 # 通过大模型用给定的实例文本内容生成思考内容（也就是让大模型去分析一下这段文字怎么写最合适，要注意哪些点。这个内容最后放到think里去训练）
 async def llm_gen_think_content(data, tmp_save_obj, semaphore):
+    global processed_count
     template = '''
         你是一个方案写作专家，很擅长分析方案中段落内部的逻辑。
         以下是一篇名为《{title}》下名为“{para_title}”段落的内容，请分析一下该段落内容写作时要注意的点，给出指导意见，说明如何才能写好本段落的内容。
@@ -86,7 +89,7 @@ async def llm_gen_think_content(data, tmp_save_obj, semaphore):
         data['think'] = resp
         tmp_save_obj.append(data)
         processed_count += 1
-        print(f'***** 已处理 {processed_count} 条数据 *****')
+        print(f'***** 累计已处理 {processed_count} 条数据 *****')
         
 
 # async def llm_replace_input(data, tmp_save_obj, semaphore):
@@ -342,8 +345,11 @@ def process_file_with_java(all_files, jar_path, doc_path_str, txt_path_str):
 
 # 使用大模型处理分段后生成的json文件中的部分内容
 def post_process_with_llm(json_object_to_save):
+    global processed_count
     # 暂存的obj，防止中途出错数据全丢，暂时记录处理完的数据，如果报错，就写这个数据
     tmp_save_obj = []
+    
+    print(f'共 {len(json_object_to_save)} 条数据')
     
     # 找临时存储的文件，如果存在，则读取其中内容，过滤掉已经有的数据
     if os.path.exists('data-tmp.json'):
@@ -353,9 +359,9 @@ def post_process_with_llm(json_object_to_save):
         processed_count = len(tmp_save_obj)
         # 未暂存的数据列表，也就是要继续处理的数据，从已处理的条数下标开始往后继续处理
         json_object_to_save = json_object_to_save[processed_count:]
-        print(f'临时存储文件存在，读取数据，继续处理剩余数据,剩余 {len(json_object_to_save)} 条')
+        print(f'临时存储文件存在，读取数据，继续处理剩余数据, 剩余 {len(json_object_to_save)} 条')
     else:
-        print(f'临时存储文件不存在，处理所有数据, 共 {len(json_object_to_save)} 条')
+        print(f'临时存储文件不存在，处理所有数据')
     
     # 通过LLM并发处理input格式
     try:
@@ -369,7 +375,7 @@ def post_process_with_llm(json_object_to_save):
             
     # 如果有暂存的数据，和处理好的数据一起写入
     if len(tmp_save_obj) > 0: 
-        json_object_to_save.extend(tmp_save_obj)
+        json_object_to_save = tmp_save_obj.extend(json_object_to_save)
 
 
 if __name__ == "__main__":
@@ -394,8 +400,8 @@ if __name__ == "__main__":
     txt_path = Path(txt_path_str)
     txt_files = list(txt_path.rglob('*.txt'))
     # 使用两套不同的标题正则，处理转好的txt文件 
-    do_split(txt_files, title_regex_1)
-    do_split(txt_files, title_regex_2)
+    # do_split(txt_files, title_regex_1)
+    # do_split(txt_files, title_regex_2)
     
     # 生成json数据文件
     json_object_to_save = split_data_to_json(split_path_str)
@@ -406,9 +412,8 @@ if __name__ == "__main__":
     with open('data.json', 'w', encoding='utf-8') as json_file:
         json_file.write(json.dumps(json_object_to_save, ensure_ascii=False, indent=2))
     
-    # 删除生成的json文件中的<think>内容
-    with open('data.json', 'r', encoding='utf-8') as json_file:
-        obj = json.loads(json_file.read())
-        obj = [item for item in obj if item['input'].find('<think>') == -1]
-        with open('data-final.json', 'w', encoding='utf-8') as f:
-            f.write(json.dumps(obj, ensure_ascii=False, indent=2))
+    # 处理完成，将tmp文件也更新成完整json，防止再点击运行的时候，又从上次跑到一半的地方开始
+    with open('data-tmp.json', 'w', encoding='utf-8') as json_file:
+        json_file.write(json.dumps(json_object_to_save, ensure_ascii=False, indent=2))
+    
+    print('处理完成')
