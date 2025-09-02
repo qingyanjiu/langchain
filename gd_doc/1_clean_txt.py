@@ -20,9 +20,9 @@ for root, _, files in os.walk('/Users/louisliu/dev/LLM/mdContent'):
                 elif (file.find('军桥网') != -1):
                     if (text.find('[军桥网](javascript:void(0);)') != -1):
                         final_text = text[text.find('[军桥网](javascript:void(0);)') + len('[军桥网](javascript:void(0);)'): text.find('**微信扫一扫赞赏作者**')]
-                elif (file.find('南京国防动员') != -1):
-                    if (text.find('[南京国防动员](javascript:void(0);)') != -1):
-                        final_text = text[text.find('[南京国防动员](javascript:void(0);)') + len('[南京国防动员](javascript:void(0);)'): text.find('你的赞和在看，我都喜欢')]
+                elif (file.find('南京G_F_D_Y') != -1):
+                    if (text.find('[南京G_F_D_Y](javascript:void(0);)') != -1):
+                        final_text = text[text.find('[南京G_F_D_Y](javascript:void(0);)') + len('[南京G_F_D_Y](javascript:void(0);)'): text.find('你的赞和在看，我都喜欢')]
                 elif (file.find('人防之声') != -1):
                     if (text.find('[人防之声](javascript:void(0);)') != -1):
                         final_text = text[text.find('[人防之声](javascript:void(0);)') + len('[人防之声](javascript:void(0);)'): text.find('**微信扫一扫赞赏作者**')]
