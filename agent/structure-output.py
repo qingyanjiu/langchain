@@ -123,3 +123,14 @@ elif platform.system() == "Windows":
     os.startfile("workflow.png")
 else:  # Linux
     os.system("xdg-open workflow.png")
+    
+    
+
+from langchain_core.messages import HumanMessage
+
+state = {
+    "messages": [HumanMessage(content="今天纽约的天气怎么样？")]
+}
+
+result = graph.invoke(state)
+print(result)
