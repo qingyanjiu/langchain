@@ -17,20 +17,19 @@ class QueryParams(BaseModel):
     end_date: str = Field(..., description="结束日期，格式为YYYY-MM-DD")
     groupby: str = Field(..., description="分组维度，例如按照楼层、公司、部门等分组")
 
-@tool
-def 能耗数据统计(params: QueryParams):
-    """Use this to get weather information."""
-    return f'能耗数据查询-{params}'
+@tool(args_schema=QueryParams)
+def 能耗数据统计(area: str, start_date: str, end_date: str, groupby: str):
+    """统计园区内的能耗数据"""
+    return f"安防数据统计 - {{'area': '{area}', 'start_date': '{start_date}', 'end_date': '{end_date}', 'groupby': '{groupby}'}}"
+@tool(args_schema=QueryParams)
+def 运营数据统计(area: str, start_date: str, end_date: str, groupby: str):
+    """统计园区内的运营数据"""
+    return f"运营数据统计 - {{'area': '{area}', 'start_date': '{start_date}', 'end_date': '{end_date}', 'groupby': '{groupby}'}}"
 
-@tool
-def 运营数据统计(params: QueryParams):
-    """Use this to get weather information."""
-    return f'运营数据统计-{params}'
-
-@tool
-def 安防数据统计(params: QueryParams):
-    """Use this to get weather information."""
-    return f'安防数据统计-{params}'
+@tool(args_schema=QueryParams)
+def 安防数据统计(area: str, start_date: str, end_date: str, groupby: str):
+    """统计园区内的安防数据"""
+    return f"安防数据统计 - {{'area': '{area}', 'start_date': '{start_date}', 'end_date': '{end_date}', 'groupby': '{groupby}'}}"
 
 
 
@@ -39,9 +38,8 @@ tools = [能耗数据统计, 运营数据统计, 安防数据统计]
 llm = ChatOpenAI(
     temperature=0,
     max_retries=3,
-    api_key="123",
-    base_url="http://localhost:1234/v1/",
-    model="google/gemma-3-12b"
+    base_url="https://api.siliconflow.cn/v1",
+    model="Qwen/Qwen3-Next-80B-A3B-Instruct"
 )
 
 model_with_tools = llm.bind_tools(tools)
@@ -58,26 +56,33 @@ from langchain_core.messages import HumanMessage
 # Define the function that calls the model
 def call_model(state: AgentState):
     system_msg = SystemMessage(content='''
-    你是园区数据分析助手，请根据要求组合查询条件，并从工具中选择合适的工具进行查询。
+    你是园区数据分析助手，你的任务是:
+    - 根据要求组合查询条件，并从工具中选择合适的工具进行查询
+    - 将工具查询结果数据通过专业的语言转达给用户
     对于查询条件数据中的字段，说明如下：
     - area: 如果是整个园区，则值为'park';如果是楼层，则值为'B1F','1F','2F'等;
     - start_date: 查询开始时间，格式为YYYY-MM-DD
     - end_date: 查询结束时间，格式为YYYY-MM-DD
     - groupby: 如果是按区域统计，则为'area', 如果按公司统计，则为'company', 如果按时间统计，则为'time'
+    *** 注意：***
+    - 你需要将工具返回的数据通过对应的专业知识提取出来，生成报告的文本
+    - 不要编造数据，如果无法通过工具的查询结果总结出专业的内容，就直接回答"没有找到相关数据"。
     ''')
     response = model_with_tools.invoke([system_msg] + state["messages"])
     # We return a list, because this will get added to the existing list
     return {"messages": [response]}
 
 
-# Define the function that responds to the user
+# 将结果转为指定对象格式
 def respond(state: AgentState):
     # We call the model with structured output in order to return the same format to the user every time
     # state['messages'][-2] is the last ToolMessage in the convo, which we convert to a HumanMessage for the model to use
     # We could also pass the entire chat history, but this saves tokens since all we care to structure is the output of the tool
-    response = model_with_structured_output.invoke(
-        [HumanMessage(content=state["messages"][-2].content)]
-    )
+    # response = model_with_structured_output.invoke(
+    #     [HumanMessage(content=state["messages"][-2].content)]
+    # )
+    
+    response = state["messages"][-1].content
     # We return the final answer
     return {"final_response": response}
 
