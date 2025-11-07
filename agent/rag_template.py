@@ -1,462 +1,443 @@
-# agentic_workflow_enhanced.py
+# agentic_workflow_langchain_decorator.py
 """
-增强版 Agent 工作流（Python）
+LangChain + @tool 版增强 Agent 工作流
 功能：
-- Planner -> Executor -> Evaluator 三段式流程
-- 工具注册与路由（规则 + LLM 判定混合）
-- Executor 支持 RAG 流水线（query -> read_chunks）
-- 并行执行工具（ThreadPoolExecutor）
-- 日志/trace 与状态持久化：JSON / SQLite / Redis
-- 简单记忆（MemoryNode）
-- 重试与错误处理、超时
-- 可以切换 MockLLM 或 真实 ChatOpenAI（示例）
-
-
-使用/部署说明（要点）
-1.	如果要用真实 LLM：
-•	将 use_real_llm = True，并在 ChatOpenAIWrapper(...) 中传入真实 SDK 初始化参数（api_key, model, base_url 等）。
-•	ChatOpenAIWrapper 是轻量封装，具体如何调用你使用的 SDK（langchain_openai、openai、或其他）需要做小修改以匹配其 API（例如 client.chat、client.invoke 等）。
-2.	工具替换：
-•	把 mock_query_knowledge_base 与 mock_read_file_chunks 替换为你实际的知识库检索 / 文档读取函数（保持返回格式兼容，检索返回 records，读文档返回 chunks）。
-•	建议检索函数返回 records 数组，每条记录包含 file_id, chunk_index, score, text。
-3.	路由器（规则 + LLM）
-•	ToolRegistry.route 先做关键词规则匹配，若不足再调用 LLM（llm_router）建议工具名。你可以扩展 LLM prompt 让它返回 JSON 或更结构化的结果以便解析。
-4.	RAG 流水线
-•	executor_rag_pipeline 自动把检索结果的 topK 文档传给 read_file_chunks（或其它读取工具）进行精读，这是你要的「先粗后细」策略。
-5.	持久化
-•	Persistor 支持三种方式：JSON 文件、SQLite（适合单机持久化）、Redis（适合分布式）。根据生产环境选择。Redis 用于多实例协同时非常有用。
-6.	扩展点
-•	可将 executor_rag_pipeline 增强为并行处理多个 query、或将 read_file_chunks 的读取细化为按 chunkIndex 精读并评分后只保留最有价值片段。
-•	可加入 token/cost 监控、Prometheus 指标、错误告警等。
+- Planner -> Executor -> Evaluator -> Answer Composer
+- 使用 @tool 装饰器注册工具
+- Executor 支持 RAG 流水线（RetrievalQA）
+- 多轮 Memory 管理
+- 持久化：JSON / SQLite
 """
 
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
-import json, time, uuid, traceback, sqlite3, os
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import json, time, uuid, os
+from typing import List
+from langchain_openai import ChatOpenAI
+from langchain.agents import tool, AgentExecutor, initialize_agent, AgentType
+from langgraph.prebuilt import create_react_agent
+from langchain.memory import ConversationBufferMemory
+from pydantic import BaseModel, Field
+from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage, AIMessage
+import requests
+import logging
 
-# Redis 是可选依赖，如果没有安装会回退到文件/SQLite
-try:
-    import redis
-except Exception:
-    redis = None
+logging.basicConfig(
+    filename='app.log',       # 写入文件
+    filemode='a',             # 追加模式，可改为 'w' 覆盖
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(name)s - %(message)s'
+)
 
-# 如果你使用 langchain_openai 的 ChatOpenAI，请按需替换导入
-# 下面的 ChatOpenAI 演示用占位（若未安装，请使用 MockLLM）
-try:
-    from langchain_openai import ChatOpenAI  # 如无此包，请使用 MockLLM 或替换为你的 LLM SDK
-except Exception:
-    ChatOpenAI = None
-
-# -------------------------------
-# LLM 接口 & 实现
-# -------------------------------
-class LLMInterface:
-    def invoke(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
-        """
-        messages: [{'role': 'system'|'user'|'assistant', 'content': '...'}, ...]
-        返回: {'content': 'model text', ...}
-        """
-        raise NotImplementedError
-
-class MockLLM(LLMInterface):
-    def invoke(self, messages):
-        # 基于最后 user 消息简单回应（便于脱网调试）
-        last_user = [m for m in messages if m['role']=='user'][-1]['content']
-        if '生成计划' in last_user or 'plan' in last_user or '规划' in last_user:
-            return {'content': "1. 在知识库中检索相关文档\n2. 精读 top2 文档段落\n3. 汇总并给出结论"}
-        if '评估' in last_user or '是否充分' in last_user:
-            return {'content': "评估结果：证据充分，可以回答。"}
-        return {'content': "MockLLM 回应：已收到请求，返回模拟文本。"}
-
-class ChatOpenAIWrapper(LLMInterface):
-    """
-    用法示例：请确保你已安装并配置好对应的 SDK（此处以 langchain_openai.ChatOpenAI 为例）。
-    构造时传入与该 SDK 对应的参数（api_key, base_url, model 等）。
-    """
-    def __init__(self, **kwargs):
-        if ChatOpenAI is None:
-            raise RuntimeError("ChatOpenAI SDK 未找到，请安装或使用 MockLLM。")
-        # ChatOpenAI 的构造参数视具体包版本而定，请替换下列示例为你环境的实际初始化
-        self.client = ChatOpenAI(**kwargs)
-
-    def invoke(self, messages: List[Dict[str,str]]) -> Dict[str, Any]:
-        # 将 messages 转成 sdk 所需格式并调用
-        # 这里假设 client.invoke 或 client.chat 方法返回 .content 或 .text
-        # 你需要根据所用 SDK 做微调
-        # 示例（伪代码）：
-        resp = self.client.invoke(messages) if hasattr(self.client, "invoke") else self.client(messages)
-        # 规范化返回
-        if isinstance(resp, dict) and 'content' in resp:
-            return resp
-        # 尝试从对象中提取文本
-        text = getattr(resp, 'content', None) or getattr(resp, 'text', None) or str(resp)
-        return {'content': text}
+def _safe_serialize(obj):
+    """递归将 BaseMessage 转为 dict"""
+    if isinstance(obj, BaseMessage):
+        return obj.model_dump()
+    elif isinstance(obj, list):
+        return [_safe_serialize(i) for i in obj]
+    elif isinstance(obj, dict):
+        return {k: _safe_serialize(v) for k, v in obj.items()}
+    else:
+        return obj
 
 # -------------------------------
-# Tool / ToolRegistry
-# -------------------------------
-@dataclass
-class Tool:
-    name: str
-    func: Callable[..., Any]
-    tags: List[str] = field(default_factory=list)
-    description: str = ""
-    meta: Dict[str, Any] = field(default_factory=dict)
-
-class ToolRegistry:
-    def __init__(self, llm_router: Optional[LLMInterface]=None):
-        self._tools: Dict[str, Tool] = {}
-        self.llm_router = llm_router  # 如果存在，用来做复杂路由判断
-
-    def register(self, tool: Tool):
-        self._tools[tool.name] = tool
-
-    def get(self, name: str) -> Tool:
-        return self._tools[name]
-
-    def list(self):
-        return list(self._tools.keys())
-
-    def route(self, intent: str, top_k: int = 3) -> List[Tool]:
-        """
-        混合路由策略：
-         1) 简单规则匹配（关键词）
-         2) 若未命中且 llm_router 可用，则调用 LLM 给出推荐工具列表（按名称/理由）
-        返回匹配到的工具列表（最多 top_k）
-        """
-        intent_lower = intent.lower()
-        matches = []
-        # 规则匹配：tool name 或 description 中包含关键词
-        for t in self._tools.values():
-            if any(k in intent_lower for k in t.name.lower().split('_')) or any(k.lower() in intent_lower for k in t.tags):
-                matches.append(t)
-        # 如果规则匹配不足且提供了 llm_router，则让 LLM 给出建议
-        if len(matches) < top_k and self.llm_router is not None:
-            # 构造 prompt 请求 LLM 推荐工具名（简单格式化）
-            system = {"role":"system", "content":"你是一个工具路由器。请根据用户意图返回最相关的工具名称列表，按照优先级用逗号分隔。"}
-            user = {"role":"user", "content": f"用户意图：{intent}\n已有工具：{','.join(self.list())}\n请返回最多 {top_k} 个最相关工具名，逗号分隔，严谨且不要多余说明。"}
-            try:
-                rsp = self.llm_router.invoke([system, user])
-                txt = rsp.get("content","")
-                # 从 LLM 输出中解析工具名
-                candidates = [s.strip() for s in txt.replace('\n',',').split(',') if s.strip()]
-                for name in candidates:
-                    if name in self._tools and self._tools[name] not in matches:
-                        matches.append(self._tools[name])
-                        if len(matches) >= top_k:
-                            break
-            except Exception:
-                pass
-        # 最终返回 top_k
-        if not matches:
-            # 兜底：返回所有带 'query' 或 'read' 的工具优先
-            matches = [t for t in self._tools.values() if 'query' in t.name.lower() or 'read' in t.name.lower()]
-        return matches[:top_k]
-
-# -------------------------------
-# Persistence: JSON / SQLite / Redis
+# 持久化
 # -------------------------------
 class Persistor:
-    def __init__(self, method: str = "json", path: str = "agent_state.json", sqlite_path: str = "agent_state.db", redis_cfg: Dict = None):
+    def __init__(self, method: str = "json", path: str = "agent_state.json", sqlite_path: str = "agent_state.db"):
         self.method = method.lower()
         self.path = path
         self.sqlite_path = sqlite_path
-        self.redis_cfg = redis_cfg or {
-            "host": "127.0.0.1",
-            "port": 6379,
-            "db": 0,
-            "password": None,
-            "decode_responses": True,
-            "socket_timeout": 5,
-        }
-        self.redis_client = None
-        if self.method == "redis" and redis is not None:
-            self.redis_client = redis.Redis(**self.redis_cfg)
 
-    def save(self, key: str, data: Dict[str, Any]):
-        if self.method == "json":
-            with open(self.path, "w", encoding="utf-8") as f:
-                json.dump({key: data}, f, ensure_ascii=False, indent=2)
-        elif self.method == "sqlite":
+    def save(self, key: str, data: dict):
+        if not data:
+            return
+        if self.method=="json":
+            with open(self.path,"w",encoding="utf-8") as f:
+                json.dump({key:_safe_serialize(data)}, f, ensure_ascii=False, indent=2)
+        elif self.method=="sqlite":
+            import sqlite3
             conn = sqlite3.connect(self.sqlite_path)
             c = conn.cursor()
-            c.execute("""CREATE TABLE IF NOT EXISTS agent_state (key TEXT PRIMARY KEY, payload TEXT, updated_at REAL)""")
-            payload = json.dumps(data, ensure_ascii=False)
-            c.execute("REPLACE INTO agent_state (key, payload, updated_at) VALUES (?,?,?)", (key, payload, time.time()))
+            c.execute("CREATE TABLE IF NOT EXISTS agent_state (key TEXT PRIMARY KEY, payload TEXT, updated_at REAL)")
+            c.execute("REPLACE INTO agent_state (key,payload,updated_at) VALUES (?,?,?)", (key,json.dumps(data,ensure_ascii=False),time.time()))
             conn.commit()
             conn.close()
-        elif self.method == "redis" and self.redis_client:
-            self.redis_client.set(key, json.dumps(data, ensure_ascii=False))
-        else:
-            # fallback to json
-            with open(self.path, "w", encoding="utf-8") as f:
-                json.dump({key: data}, f, ensure_ascii=False, indent=2)
 
-    def load(self, key: str) -> Optional[Dict[str, Any]]:
-        if self.method == "json":
+    def load(self, key: str):
+        if self.method=="json":
             if not os.path.exists(self.path): return None
-            with open(self.path, "r", encoding="utf-8") as f:
-                d = json.load(f)
-            return d.get(key)
-        elif self.method == "sqlite":
+            with open(self.path,"r",encoding="utf-8") as f:
+                try:
+                    d = json.load(f)
+                except json.JSONDecodeError:
+                    d = None
+            return d.get(key) if d else None
+        elif self.method=="sqlite":
+            import sqlite3
             conn = sqlite3.connect(self.sqlite_path)
             c = conn.cursor()
             c.execute("SELECT payload FROM agent_state WHERE key=?", (key,))
             row = c.fetchone()
             conn.close()
-            if row:
-                return json.loads(row[0])
-            return None
-        elif self.method == "redis" and self.redis_client:
-            v = self.redis_client.get(key)
-            return json.loads(v) if v else None
-        else:
-            return None
+            return json.loads(row[0]) if row else None
 
 # -------------------------------
-# WorkflowEngine（带 RAG 流水线）
+# 工具
 # -------------------------------
-class WorkflowEngine:
-    def __init__(self, llm: LLMInterface, tool_registry: ToolRegistry, persistor: Persistor, max_iters: int = 3):
+
+# ======== 定义知识库控制器 ========
+class DifyKnowledgeBaseController:
+    def __init__(self, base_url: str, api_key: str, dataset_id: str):
+        self.base_url = base_url.rstrip("/")
+        self.headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        self.dataset_id = dataset_id
+
+    def search(self, query: str):
+        """调用 Dify 检索接口"""
+        url = f"{self.base_url}/v1/datasets/{self.dataset_id}/retrieve"
+        resp = requests.post(url, headers=self.headers, json={"query": query})
+        resp.raise_for_status()
+        return resp.json().get("records", [])
+
+    def list_files(self, page: int = 1, page_size: int = 100):
+        """列出知识库文件"""
+        url = f"{self.base_url}/v1/datasets/{self.dataset_id}/documents?page={page}&limit={page_size}"
+        resp = requests.get(url, headers=self.headers)
+        resp.raise_for_status()
+        return resp.json().get("data", [])
+
+    def list_datasets(self, page: int = 1, page_size: int = 100):
+        """获取知识库列表信息"""
+        url = f"{self.base_url}/v1/datasets?page={page}&limit={page_size}"
+        resp = requests.get(url, headers=self.headers)
+        resp.raise_for_status()
+        return resp.json().get("data", [])
+
+    def read_file_chunks(self, doc_id: str):
+        """读取文件的分段内容"""
+        url = f"{self.base_url}/v1/datasets/{self.dataset_id}/documents/{doc_id}/segments"
+        resp = requests.get(url, headers=self.headers)
+        resp.raise_for_status()
+        return resp.json().get("data", [])
+
+# ======== 初始化知识库控制器 ========
+kb_controller = DifyKnowledgeBaseController(
+    base_url="http://localhost",
+    api_key="dataset-XqsUQ5VQWkejtgJHFzEsZLar",
+    dataset_id="c5153abf-19b3-429b-9902-812dd85c8bfc"
+)
+
+@tool("query_knowledge_base")
+def query_knowledge_base(query: str) -> str:
+    """根据问题在知识库中进行语义检索，返回候选片段列表"""
+    results = kb_controller.search(query)
+    return json.dumps(results, ensure_ascii=False, indent=2)
+
+
+@tool("list_datasets")
+def list_datasets() -> str:
+    """获取知识库列表"""
+    results = kb_controller.list_datasets()
+    return json.dumps(results, ensure_ascii=False, indent=2)
+
+
+@tool("read_file_chunks")
+def read_file_chunks(doc_ids: List[str]) -> str:
+    """读取指定文件的所有分段内容"""
+    if not doc_ids:
+        return "请提供文件ID数组"
+    results = {}
+    for doc_id in doc_ids:
+        results[doc_id] = kb_controller.read_file_chunks(doc_id)
+    return json.dumps(results, ensure_ascii=False, indent=2)
+
+
+@tool("list_files")
+def list_files(page: int = 1, page_size: int = 10) -> str:
+    """列出当前知识库中的文件，返回文件ID、文件名和chunk数"""
+    results = kb_controller.list_files(page, page_size)
+    return json.dumps(results, ensure_ascii=False, indent=2)
+
+# =========== API查询工具 ==========
+
+# api工具专用的llm
+api_llm = ChatOpenAI(
+    api_key="123",
+    temperature=0,
+    max_retries=3,
+    base_url="http://localhost:1234/v1",
+    model="qwen/qwen3-8b"
+)
+
+class QueryParams(BaseModel):
+    area: str = Field(..., description="区域名称，比如‘东区’或‘A栋’")
+    start_date: str = Field(..., description="开始日期，格式为YYYY-MM-DD")
+    end_date: str = Field(..., description="结束日期，格式为YYYY-MM-DD")
+    groupby: str = Field(..., description="分组维度，例如按照楼层、公司、部门等分组")
+    
+# API查询工具内部调用 llm
+def call_model_in_tool(system_prompt: str, user_prompt: str):
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=user_prompt)
+    ]
+    # 在 tool 内部直接调用 llm
+    response = api_llm.invoke(messages)
+    return response
+
+@tool(args_schema=QueryParams, description='''
+    用于查询园区能耗相关数据。
+    可根据指定的区域、时间范围和分组方式返回能耗统计结果。
+    常用于生成能耗分析报告或趋势分析。
+    ''')
+def 能耗数据统计(area: str, start_date: str, end_date: str, groupby: str):
+    """统计园区内的能耗数据"""
+    system_prompt = '''
+    你是一位能耗分析专家，请根据输入数据生成专业的能耗分析报告。
+    请用简洁、客观的语气说明能耗趋势和异常点。
+    *** 注意：***
+    - 你需要将工具返回的数据通过对应的专业知识提取出来，生成报告的文本
+    - 不要编造数据，如果无法通过工具的查询结果总结出专业的内容，就直接回答"没有找到相关数据"。
+    '''
+    # 拼接用户输入内容
+    user_prompt = f"""
+    园区：{area}
+    时间段：{start_date} 至 {end_date}
+    统计维度：{groupby}
+    请生成分析报告。
+    """
+    response = call_model_in_tool(system_prompt, user_prompt)
+    return response.content
+
+
+@tool(args_schema=QueryParams, description='''
+    用于查询园区运营相关数据。
+    可根据指定的区域、时间范围和分组方式返回运营统计结果。
+    常用于生成运营分析报告或趋势分析。
+    ''')
+def 运营数据统计(area: str, start_date: str, end_date: str, groupby: str):
+    """统计园区内的运营数据"""
+    system_prompt = '''
+    你是一位运营分析专家，请根据输入数据生成专业的运营分析报告。
+    请用简洁、客观的语气说明运营趋势和异常点。
+    *** 注意：***
+    - 你需要将工具返回的数据通过对应的专业知识提取出来，生成报告的文本
+    - 不要编造数据，如果无法通过工具的查询结果总结出专业的内容，就直接回答"没有找到相关数据"。
+    '''
+    # 拼接用户输入内容
+    user_prompt = f"""
+    园区：{area}
+    时间段：{start_date} 至 {end_date}
+    统计维度：{groupby}
+    请生成分析报告。
+    """
+    response = call_model_in_tool(system_prompt, user_prompt)
+    return response.content
+
+
+@tool(args_schema=QueryParams, description='''
+    用于查询园区安防相关数据。
+    可根据指定的区域、时间范围和分组方式返回安防统计结果。
+    常用于生成安防分析报告或趋势分析。
+    ''')
+def 安防数据统计(area: str, start_date: str, end_date: str, groupby: str):
+    """统计园区内的安防数据"""
+    system_prompt = '''
+    你是一位安防分析专家，请根据输入数据生成专业的安防分析报告。
+    请用简洁、客观的语气说明安防趋势和异常点。
+    *** 注意：***
+    - 你需要将工具返回的数据通过对应的专业知识提取出来，生成报告的文本
+    - 不要编造数据，如果无法通过工具的查询结果总结出专业的内容，就直接回答"没有找到相关数据"。
+    '''
+    # 拼接用户输入内容
+    user_prompt = f"""
+    园区：{area}
+    时间段：{start_date} 至 {end_date}
+    统计维度：{groupby}
+    请生成分析报告。
+    """
+    response = call_model_in_tool(system_prompt, user_prompt)
+    return response.content
+
+
+# -------------------------------
+# Workflow Engine
+# -------------------------------
+class LCWorkflowEngine:
+    def __init__(self, run_id, llm, tools, persistor: Persistor, system_prompt, max_iters=3):
         self.llm = llm
-        self.tool_registry = tool_registry
         self.persistor = persistor
         self.max_iters = max_iters
-        self.run_id = str(uuid.uuid4())
-        self.trace: List[Dict[str, Any]] = []
-        self.memory = {}
+        self.run_id = str(uuid.uuid4()) if not run_id else run_id
+        self.trace = []
+        self.memory = ConversationBufferMemory(memory_key="chat_history")
+        self.tools = tools
+        self.system_prompt = system_prompt
+        agent = create_react_agent(self.llm, tools=self.tools, prompt=self.system_prompt)
+        self.agent = AgentExecutor(agent=agent, tools=self.tools, memory=self.memory, verbose=True)
 
-    def _trace(self, phase: str, meta: Dict[str, Any], output: Any):
-        rec = {"ts": time.time(), "phase": phase, "meta": meta, "output": output}
-        self.trace.append(rec)
 
-    def planner(self, user_query: str) -> List[str]:
-        system = {"role":"system","content":"你是 Planner，生成 2-5 步可执行计划，简洁条理。"}
-        user = {"role":"user","content":f"请为任务生成执行计划：{user_query}\n要求：2-5 个步骤，每步尽量可执行（例如：检索、读取、汇总、外呼）。"}
-        resp = self.llm.invoke([system, user])
-        plan_text = resp.get("content","")
-        self._trace("planner", {"query": user_query}, plan_text)
-        steps = [line.strip().lstrip("0123456789. ").strip() for line in plan_text.splitlines() if line.strip()]
-        if not steps:
-            steps = [plan_text]
-        return steps
-
-    def _safe_call_tool(self, tool_obj: Tool, arg: Any):
-        try:
-            return {"ok": True, "result": tool_obj.func(arg)}
-        except Exception as e:
-            try:
-                time.sleep(0.5)
-                return {"ok": True, "result": tool_obj.func(arg)}
-            except Exception as e2:
-                return {"ok": False, "error": str(e2), "traceback": traceback.format_exc()}
-
-    def executor_rag_pipeline(self, query_step: str, top_k_docs: int = 2) -> Dict[str, Any]:
+    # 从持久化的trace中恢复对话历史
+    def _restore_memory(self):
+        # 遍历 trace，把历史对话按顺序添加到 memory（只找最近5条）
+        for entry in self.trace[-5:]:
+            if entry['phase'] == 'executor_agent':
+                # entry['output'] 可以是 AIMessage 或字符串
+                out = entry['output']
+                if isinstance(out, AIMessage):
+                    # agent 回答
+                    self.memory.chat_memory.add_ai_message(out.content)
+                elif isinstance(out, str):
+                    # 字符串也可以直接加入
+                    self.memory.chat_memory.add_ai_message(out)
+            elif entry['phase'] == 'loop_start':
+                # loop_start 的 input 就是用户提问
+                step_list = entry['meta'].get("plan", [])
+                for step in step_list:
+                    self.memory.chat_memory.add_user_message(step)
+    def _trace(self, phase, meta, output):
+        self.trace.append({"ts":time.time(),"phase":phase,"meta":meta,"output":output})
+        
+    def do_plan(self, user_query: str):
+        plan_prompt = f"""
+        请生成一个执行计划，该计划将按照以下步骤执行：
+        {user_query}
+        执行计划需要满足以下条件：
+        - 步骤数量不能超过10个
+        - 步骤不能重复
+        - 步骤不能依赖其他步骤的结果
         """
-        RAG 专用流水线：
-        1) 调用 query_knowledge_base（或其他检索类工具）获取候选片段（records）
-        2) 选择 top_k_docs 高分记录，调用 read_file_chunks（或等价工具）获取精读内容
-        3) 返回聚合结果
-        """
-        # 先路由到检索工具
-        candidate_tools = self.tool_registry.route(query_step)
-        # 找到检索类工具优先（名字中包含 'query' 或 'search'）
-        search_tools = [t for t in candidate_tools if 'query' in t.name.lower() or 'search' in t.name.lower()]
-        if not search_tools:
-            # 兜底所有工具
-            search_tools = candidate_tools
 
-        rag_agg = {"query": query_step, "retrievals": [], "reads": []}
-        # 并行执行搜索工具（通常只有一个）
-        for t in search_tools:
-            out = self._safe_call_tool(t, query_step)
-            self._trace("executor_tool_call", {"tool": t.name, "arg": query_step}, out)
-            if not out.get("ok"):
-                continue
-            result = out["result"]
-            # 约定 result 为 dict 包含 'records' 或 'hits' 等
-            records = result.get("records") if isinstance(result, dict) else None
-            if not records:
-                # 兼容不同工具输出
-                records = result.get("hits") if isinstance(result, dict) else None
-            # 记录检索返回
-            rag_agg["retrievals"].append({"tool": t.name, "records": records})
-            # 从 records 中挑 top_k_docs（按 score 字段）
-            if records:
-                try:
-                    sorted_rs = sorted(records, key=lambda r: float(r.get("score", 0)), reverse=True)
-                except Exception:
-                    sorted_rs = records
-                top = sorted_rs[:top_k_docs]
-                # 从 top 中提取 file_id，然后调用 read_file_chunks 工具（如果有）
-                read_tool = None
-                # 先尝试在 registry 中查找 read_file_chunks
-                if "read_file_chunks" in self.tool_registry.list():
-                    read_tool = self.tool_registry.get("read_file_chunks")
-                else:
-                    # 否则找名字中包含 'read' 的工具
-                    for tt in self.tool_registry._tools.values():
-                        if 'read' in tt.name.lower() or 'chunk' in tt.name.lower():
-                            read_tool = tt
-                            break
-                if read_tool:
-                    file_ids = []
-                    # 记录要读取的 doc ids 或 chunk references（以适配不同工具）
-                    for rec in top:
-                        # 尝试从 record 提取 file_id 字段
-                        if isinstance(rec, dict) and 'file_id' in rec:
-                            file_ids.append(rec['file_id'])
-                    # 调用读取工具（可传 file_ids 列表或单个 id，视工具实现）
-                    if file_ids:
-                        read_out = self._safe_call_tool(read_tool, file_ids)
-                        self._trace("read_tool_call", {"tool": read_tool.name, "file_ids": file_ids}, read_out)
-                        if read_out.get("ok"):
-                            rag_agg["reads"].append({"tool": read_tool.name, "file_ids": file_ids, "content": read_out["result"]})
-                else:
-                    # 没有读取工具时，把 top text 直接加入 reads
-                    rag_agg["reads"].append({"tool": None, "file_ids": [r.get("file_id") for r in top], "content": top})
-        return rag_agg
-
-    def executor_generic(self, step: str) -> Dict[str, Any]:
-        """
-        针对非 RAG 步骤的通用 executor：路由工具并并行调用
-        """
-        tools = self.tool_registry.route(step)
-        self._trace("executor_route", {"step": step, "candidates": [t.name for t in tools]}, "")
-        results = []
-        if not tools:
-            return {"ok": False, "error": "no_tools"}
-        with ThreadPoolExecutor(max_workers=min(4, len(tools))) as ex:
-            futures = {ex.submit(self._safe_call_tool, t, step): t for t in tools}
-            for fut in as_completed(futures):
-                t = futures[fut]
-                try:
-                    r = fut.result()
-                except Exception as e:
-                    r = {"ok": False, "error": str(e)}
-                results.append({"tool": t.name, "out": r})
-        self._trace("executor_results", {"step": step}, results)
-        return {"ok": True, "step": step, "results": results}
-
-    def evaluator(self, aggregated: List[Dict[str,Any]], user_query: str) -> Dict[str, Any]:
-        system = {"role":"system", "content":"你是 Evaluator，判断证据是否充分并给出下一步建议（若不足）。"}
-        content = f"用户问题：{user_query}\n工具聚合结果摘要：\n"
-        content += json.dumps(aggregated, ensure_ascii=False, indent=2)
-        user = {"role":"user", "content": content + "\n请判断是否已有足够证据回答，若足够请返回：OK。否则请给出下一步明确要执行的查询或检索指令（一句话）。并说明理由。"}
-        resp = self.llm.invoke([system, user])
-        decision = resp.get("content","")
-        self._trace("evaluator", {"aggregated_count": len(aggregated)}, decision)
-        return {"decision": decision}
-
-    def _compose_answer(self, aggregated: List[Dict[str,Any]], user_query: str) -> str:
-        # 用 LLM 汇总答案（更自然）
-        system = {"role":"system", "content":"你是 Answer Composer，把工具返回的证据合成为给用户的回答，并在末尾列出引用来源（file_id/chunk）。"}
-        user = {"role":"user", "content": f"用户问题：{user_query}\n工具聚合结果：\n{json.dumps(aggregated, ensure_ascii=False, indent=2)}\n请基于事实写出回答，并在末尾以 引用: [file_id:chunkIndex] 列出证据来源。"}
-        resp = self.llm.invoke([system, user])
-        ans = resp.get("content","")
-        self._trace("compose_answer", {}, ans)
-        return ans
-
-    def run(self, user_query: str) -> Dict[str, Any]:
+    def run(self, user_query: str):
         key = f"run:{self.run_id}"
-        # 尝试恢复
         saved = self.persistor.load(key)
         if saved:
             self.trace = saved.get("trace", [])
-            self.memory = saved.get("memory", {})
-        plan = self.planner(user_query)
-        aggregated = []
+    
         iter_count = 0
+        aggregated = []
+        
+        # TODO 如果是多个请求，则先生成plan，再将plan交给engine去执
+        plan = [user_query]
+
         while iter_count < self.max_iters:
             iter_count += 1
+            # 恢复之前持久化的对话历史
+            self._restore_memory()
             self._trace("loop_start", {"iter": iter_count, "plan": plan}, "")
             for step in plan:
-                # 如果步骤看起来是检索相关（包含关键词），用 RAG 流水线
-                step_lower = step.lower()
-                if any(k in step_lower for k in ("search", "检索", "查找", "检索知识库", "query", "retrieve", "检索文档")):
-                    out = self.executor_rag_pipeline(step)
-                else:
-                    out = self.executor_generic(step)
-                aggregated.append(out)
-            # 评估
-            eval_out = self.evaluator(aggregated, user_query)
-            decision_text = eval_out.get("decision","").strip()
-            if not decision_text:
-                # 如果评估无回答，终止
-                self._trace("no_eval", {}, "")
+                # 通过 Agent普通工具调用
+                try:
+                    out = self.agent.invoke({"input": step})
+                    aggregated.append({"step":step,"output":_safe_serialize(out)})
+                    self._trace("executor_agent", {"step":step}, out)
+                except Exception as e:
+                    aggregated.append({"step":step,"output":str(e)})
+
+            # Evaluator
+            eval_prompt = f"""
+            你是 Evaluator，判断以下内容是否充分回答用户问题：
+            用户问题：{user_query}
+            聚合结果：
+            {json.dumps(aggregated, ensure_ascii=False)}
+            若充分请返回 OK，否则给出下一步明确要执行的动作。
+            """
+            eval_resp = self.llm.invoke(eval_prompt)
+            decision_text = eval_resp.content
+            self._trace("evaluator", {"aggregated_count":len(aggregated)}, decision_text)
+
+            if "ok" in decision_text.lower() or "充分" in decision_text.lower():
+                answer_prompt = f"""
+                你是 Answer Composer，请基于聚合结果生成回答：
+                用户问题：{user_query}
+                聚合结果：
+                {json.dumps(aggregated, ensure_ascii=False)}
+                输出自然语言答案并列出引用来源。
+                """
+                final_answer = self.llm.invoke(answer_prompt)
+                self._trace("compose_answer", {}, final_answer)
                 self.persist()
-                return {"status":"insufficient", "trace": self.trace}
-            # 简单判断关键词确认
-            if any(ok_word in decision_text.lower() for ok_word in ("ok", "可以", "充分", "足够")):
-                final_answer = self._compose_answer(aggregated, user_query)
-                self.memory['last_answer'] = final_answer
-                self.persist()
-                return {"status":"ok", "answer": final_answer, "trace": self.trace}
+                return {"status":"ok","answer":final_answer,"trace":self.trace}
             else:
-                # 将评估返回作为新的 plan（只取第一句作为下一步）
                 plan = [decision_text.splitlines()[0]]
-                self._trace("plan_updated", {"new_plan": plan}, decision_text)
-                # 继续循环
-        # 超出迭代次数
+                self._trace("plan_updated", {"new_plan":plan}, decision_text)
+
         self._trace("max_iters_exceeded", {}, "")
         self.persist()
-        return {"status":"insufficient", "message":"多轮仍无法得到足够证据", "trace": self.trace}
+        return {"status":"insufficient","message":"多轮仍无法得到足够证据","trace":self.trace}
 
     def persist(self):
         key = f"run:{self.run_id}"
-        payload = {"trace": self.trace, "memory": self.memory}
+        payload = {"trace":self.trace}
         self.persistor.save(key, payload)
 
 # -------------------------------
-# 示例工具实现（请用真实实现替换）
-# -------------------------------
-def mock_query_knowledge_base(query: str):
-    # 返回 records：{file_id, chunk_index, score, text}
-    return {"records": [
-        {"file_id":"docA", "chunk_index":0, "score":0.95, "text":"RAG 概念：结合检索与生成..."},
-        {"file_id":"docB", "chunk_index":1, "score":0.82, "text":"检索增强生成的优点..."}
-    ]}
-
-def mock_read_file_chunks(file_ids: List[str]):
-    chunks = []
-    for fid in file_ids:
-        chunks.append({"file_id": fid, "chunks": [
-            {"chunk_index":0, "text": f"{fid} - chunk0 内容"},
-            {"chunk_index":1, "text": f"{fid} - chunk1 内容"}
-        ]})
-    return {"chunks": chunks}
-
-def mock_external_api(q: str):
-    return {"ok": True, "result": f"外部接口返回：{q}"}
-
-# -------------------------------
-# Demo 主函数（配置示例）
+# Demo
 # -------------------------------
 def demo():
-    # 选择是否使用真实 LLM（ChatOpenAI）或 Mock
-    use_real_llm = False  # 改为 True 并按下述注释配置 ChatOpenAIWrapper 时使用真实模型
-    if use_real_llm:
-        # 示例：如何初始化 ChatOpenAIWrapper（请根据你实际 SDK 参数替换）
-        llm = ChatOpenAIWrapper(api_key="YOUR_API_KEY", base_url="http://localhost:1234/v1", model="gpt-4o")
-    else:
-        llm = MockLLM()
+    
+    llm = ChatOpenAI(
+        api_key="123",
+        temperature=0,
+        max_retries=3,
+        base_url="http://localhost:1234/v1",
+        model="qwen/qwen3-8b"
+    )
 
-    # 初始化工具注册器（并传入 llm 用作路由器）
-    registry = ToolRegistry(llm_router=llm)
-    registry.register(Tool(name="query_knowledge_base", func=mock_query_knowledge_base, description="query kb"))
-    registry.register(Tool(name="read_file_chunks", func=mock_read_file_chunks, description="read chunks"))
-    registry.register(Tool(name="external_api", func=mock_external_api, description="external api"))
+    api_tools_name = [
+        '能耗数据统计', '运营数据统计', '安防数据统计'
+    ]
+    
+    datasets_tools_name = [
+        'query_knowledge_base', 'read_file_chunks', 'list_datasets', 'list_files'
+    ]
 
-    # 选择 persist 存储方式: "json" / "sqlite" / "redis"
-    persist_method = "sqlite"  # 或 "json" / "redis"
-    redis_cfg = {"host":"localhost", "port":6379, "db":0}  # 若使用 redis，请保证 redis 可用并已安装 redis 模块
-    persistor = Persistor(method=persist_method, path="agent_state.json", sqlite_path="agent_state.db", redis_cfg=redis_cfg)
+    # 直接使用 @tool 装饰器的函数
+    tools = [query_knowledge_base, read_file_chunks, list_datasets, list_files, 能耗数据统计, 运营数据统计, 安防数据统计]
+    
+    # persistor = Persistor(method="sqlite", sqlite_path="agent_state.db")
+    persistor = Persistor()
 
-    engine = WorkflowEngine(llm=llm, tool_registry=registry, persistor=persistor, max_iters=3)
-    q = "请基于知识库，概述 RAG 的优缺点，并给出引用。"
+    engine = LCWorkflowEngine(llm=llm, tools=tools, persistor=persistor, run_id="d08cb46d-71ea-4459-b7cb-5f8187ab8cf1",
+                            system_prompt=
+    f"""你是一个 Agentic RAG 助手,请根据要求依次通过知识库检索以及API查询来回答问题。
+    
+    * 在检索知识库的时候，请使用以下几个工具来进行检索:{','.join(datasets_tools_name)}
+    遵循以下步骤：
+    1. 用 query_knowledge_base 搜索知识库中相关内容，获得候选文件和片段线索
+    2. 使用 read_file_chunks 精读最相关的2-3个片段内容作为证据
+    3. 基于读取的具体片段内容组织答案
+    4. 回答末尾用"引用："格式列出实际读取的fileId和chunkIndex
+    5. 回答末尾用"调用："格式列出实际调用的tool和参数
+
+    重要规则：
+    - 如果检索知识库的结果为空，例如 
+    query_knowledge_base 返回为空数组 [] 或读取的文件片段内容为空，请不要继续调用其他工具，也不要根据自己的理解生成答案；
+    请直接回答："知识库中缺少相关信息，建议补充相关文档。"
+    - 你的所有回答都必须基于实际读取到的片段。
+    - 若找不到足够的证据，就明确说明“知识库中暂缺相关信息”。
+    - 优先选择评分高的搜索结果进行深入阅读。
+    - 如果实在找不到答案，就回答你不知道。
+    
+    * 在使用API查询的时候，请使用以下几个工具来进行检索:{','.join(api_tools_name)}。你的任务是:
+    - 根据要求组合查询条件，并从工具中选择合适的工具进行查询
+    - 将工具查询结果数据通过专业的语言转达给用户
+    对于查询条件数据中的字段，说明如下：
+    - area: 如果是整个园区，则值为'park';如果是楼层，则值为'B1F','1F','2F'等;
+    - start_date: 查询开始时间，格式为YYYY-MM-DD
+    - end_date: 查询结束时间，格式为YYYY-MM-DD
+    - groupby: 如果是按区域统计，则为'area', 如果按公司统计，则为'company', 如果按时间统计，则为'time'
+    - 如果没有满足条件的API，可以放弃API查询环节，直接使用知识库检索的结果来回答问题。
+    
+    如果仍然无法得到足够的证据，请直接回答："未检索到任何相关信息，建议补充相关文档及数据接口。"
+    """)
+    
+    q = "请概述 RAG 的优缺点，并给出引用。"
+    
     res = engine.run(q)
-    print(json.dumps(res, ensure_ascii=False, indent=2))
+    print(res['answer'])
 
-if __name__ == "__main__":
+if __name__=="__main__":
     demo()
