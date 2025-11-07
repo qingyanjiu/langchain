@@ -12,13 +12,18 @@ LangChain + @tool 版增强 Agent 工作流
 import json, time, uuid, os
 from typing import List
 from langchain_openai import ChatOpenAI
-from langchain.agents import tool, AgentExecutor, initialize_agent, AgentType
-from langgraph.prebuilt import create_react_agent
-from langchain.memory import ConversationBufferMemory
+from langchain.agents import create_agent
+from langchain_classic.agents import AgentExecutor
+from langchain_core.tools import tool
+from langchain_classic.memory import ConversationBufferMemory
 from pydantic import BaseModel, Field
 from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage, AIMessage
+from langchain_core.prompts.chat import PromptTemplate
 import requests
 import logging
+
+MODEL_URL = 'https://api.siliconflow.cn/v1'
+MODEL_NAME = 'Qwen/Qwen3-Next-80B-A3B-Instruct'
 
 logging.basicConfig(
     filename='app.log',       # 写入文件
@@ -129,46 +134,68 @@ kb_controller = DifyKnowledgeBaseController(
     dataset_id="c5153abf-19b3-429b-9902-812dd85c8bfc"
 )
 
-@tool("query_knowledge_base")
+class QueryKBParams(BaseModel):
+    query: str
+@tool(args_schema=QueryKBParams, description="根据问题在知识库中进行语义检索，返回候选片段列表")
 def query_knowledge_base(query: str) -> str:
     """根据问题在知识库中进行语义检索，返回候选片段列表"""
-    results = kb_controller.search(query)
+    try:
+        results = kb_controller.search(query)
+    except Exception as e:
+        logging.error(f"Error querying knowledge base: {e}")
+        return "查询知识库时出错，请稍后再试"
     return json.dumps(results, ensure_ascii=False, indent=2)
 
-
-@tool("list_datasets")
+@tool(description="获取知识库列表")
 def list_datasets() -> str:
     """获取知识库列表"""
-    results = kb_controller.list_datasets()
+    try:
+        results = kb_controller.list_datasets()
+    except Exception as e:
+        logging.error(f"Error listing datasets: {e}")
+        return "获取知识库列表时出错，请稍后再试"
     return json.dumps(results, ensure_ascii=False, indent=2)
 
-
-@tool("read_file_chunks")
+class ReadFileChunksParams(BaseModel):
+    doc_ids: List[str]
+@tool(args_schema=ReadFileChunksParams, description="读取指定文件的所有分段内容")
 def read_file_chunks(doc_ids: List[str]) -> str:
     """读取指定文件的所有分段内容"""
     if not doc_ids:
         return "请提供文件ID数组"
     results = {}
-    for doc_id in doc_ids:
-        results[doc_id] = kb_controller.read_file_chunks(doc_id)
+    try:
+        for doc_id in doc_ids:
+            results[doc_id] = kb_controller.read_file_chunks(doc_id)
+    except Exception as e:
+        logging.error(f"Error reading file chunks: {e}")
+        return "读取文件分段内容时出错，请稍后再试"
     return json.dumps(results, ensure_ascii=False, indent=2)
 
 
-@tool("list_files")
+class ListFilesParams(BaseModel):
+    page: int = 1
+    page_size: int = 10
+
+@tool(args_schema=ListFilesParams, description="列出当前知识库中的文件，返回文件ID、文件名和chunk数")
 def list_files(page: int = 1, page_size: int = 10) -> str:
     """列出当前知识库中的文件，返回文件ID、文件名和chunk数"""
-    results = kb_controller.list_files(page, page_size)
+    try:
+        results = kb_controller.list_files(page, page_size)
+    except Exception as e:
+        logging.error(f"Error listing files: {e}")
+        return "列出文件时出错，请稍后再试"
     return json.dumps(results, ensure_ascii=False, indent=2)
 
 # =========== API查询工具 ==========
 
 # api工具专用的llm
 api_llm = ChatOpenAI(
-    api_key="123",
+    # api_key="123",
     temperature=0,
     max_retries=3,
-    base_url="http://localhost:1234/v1",
-    model="qwen/qwen3-8b"
+    base_url=f"{MODEL_URL}",
+    model=f"{MODEL_NAME}"
 )
 
 class QueryParams(BaseModel):
@@ -275,9 +302,8 @@ class LCWorkflowEngine:
         self.memory = ConversationBufferMemory(memory_key="chat_history")
         self.tools = tools
         self.system_prompt = system_prompt
-        agent = create_react_agent(self.llm, tools=self.tools, prompt=self.system_prompt)
-        self.agent = AgentExecutor(agent=agent, tools=self.tools, memory=self.memory, verbose=True)
-
+        agent = create_agent(model=self.llm, tools=self.tools, system_prompt=self.system_prompt)
+        self.agent = AgentExecutor(agent=agent, tools=tools, memory=self.memory, verbose=True, handle_parsing_errors=True)
 
     # 从持久化的trace中恢复对话历史
     def _restore_memory(self):
@@ -330,11 +356,13 @@ class LCWorkflowEngine:
             for step in plan:
                 # 通过 Agent普通工具调用
                 try:
-                    out = self.agent.invoke({"input": step})
+                    out = self.agent.invoke({"input": step}, handle_tool_error=True)
                     aggregated.append({"step":step,"output":_safe_serialize(out)})
                     self._trace("executor_agent", {"step":step}, out)
                 except Exception as e:
-                    aggregated.append({"step":step,"output":str(e)})
+                    # 如果报错（通常是tool调用出错，则不调用tool继续执行）
+                    logging.error({"step":step,"output":str(e)})
+                    continue
 
             # Evaluator
             eval_prompt = f"""
@@ -366,7 +394,7 @@ class LCWorkflowEngine:
 
         self._trace("max_iters_exceeded", {}, "")
         self.persist()
-        return {"status":"insufficient","message":"多轮仍无法得到足够证据","trace":self.trace}
+        return {"status":"insufficient","answer":"多轮仍无法得到足够证据","trace":self.trace}
 
     def persist(self):
         key = f"run:{self.run_id}"
@@ -377,13 +405,12 @@ class LCWorkflowEngine:
 # Demo
 # -------------------------------
 def demo():
-    
-    llm = ChatOpenAI(
-        api_key="123",
+    agent_llm = ChatOpenAI(
+        # api_key="123",
         temperature=0,
         max_retries=3,
-        base_url="http://localhost:1234/v1",
-        model="qwen/qwen3-8b"
+        base_url=f"{MODEL_URL}",
+        model=f"{MODEL_NAME}"
     )
 
     api_tools_name = [
@@ -393,17 +420,12 @@ def demo():
     datasets_tools_name = [
         'query_knowledge_base', 'read_file_chunks', 'list_datasets', 'list_files'
     ]
-
-    # 直接使用 @tool 装饰器的函数
-    tools = [query_knowledge_base, read_file_chunks, list_datasets, list_files, 能耗数据统计, 运营数据统计, 安防数据统计]
     
-    # persistor = Persistor(method="sqlite", sqlite_path="agent_state.db")
-    persistor = Persistor()
-
-    engine = LCWorkflowEngine(llm=llm, tools=tools, persistor=persistor, run_id="d08cb46d-71ea-4459-b7cb-5f8187ab8cf1",
-                            system_prompt=
-    f"""你是一个 Agentic RAG 助手,请根据要求依次通过知识库检索以及API查询来回答问题。
-    
+    SYSTEM_PROMPT = f"""你是一个智能助手，能使用工具回答用户问题。
+    工具列表：{{tools}}
+    工具名称：{{tool_names}}
+    思考记录：{{agent_scratchpad}}
+    用户问题：{{input}}
     * 在检索知识库的时候，请使用以下几个工具来进行检索:{','.join(datasets_tools_name)}
     遵循以下步骤：
     1. 用 query_knowledge_base 搜索知识库中相关内容，获得候选文件和片段线索
@@ -432,12 +454,23 @@ def demo():
     - 如果没有满足条件的API，可以放弃API查询环节，直接使用知识库检索的结果来回答问题。
     
     如果仍然无法得到足够的证据，请直接回答："未检索到任何相关信息，建议补充相关文档及数据接口。"
-    """)
+    """
+
+    # 直接使用 @tool 装饰器的函数
+    tools = [query_knowledge_base, read_file_chunks, list_datasets, list_files, 能耗数据统计, 运营数据统计, 安防数据统计]
     
-    q = "请概述 RAG 的优缺点，并给出引用。"
+    # persistor = Persistor(method="sqlite", sqlite_path="agent_state.db")
+    persistor = Persistor()
+
+    engine = LCWorkflowEngine(llm=agent_llm, tools=tools, persistor=persistor, run_id="d08cb46d-71ea-4459-b7cb-5f8187ab8cf1",
+                            system_prompt=SYSTEM_PROMPT
+    )
     
-    res = engine.run(q)
-    print(res['answer'])
+    query = "RAG是什么？"
+    
+    res = engine.run(query)
+    answer = res['answer']
+    print(answer)
 
 if __name__=="__main__":
     demo()

@@ -2,7 +2,7 @@
 *.xlsx
 *.csv
 key.sh
-.log
+*.log
 .DS_Store
-.json
-.png
+*.json
+*.png
