@@ -55,7 +55,7 @@ class DifyKnowledgeBaseController:
 kb_controller = DifyKnowledgeBaseController(
     base_url="http://localhost",
     api_key="dataset-XqsUQ5VQWkejtgJHFzEsZLar",
-    dataset_id="c5153abf-19b3-429b-9902-812dd85c8bfc"
+    dataset_id="6c39e0d8-faa6-4a21-b628-5dd4f264d5c5"
 )
 
 
@@ -120,9 +120,8 @@ def create_agentic_rag_system():
     llm = ChatOpenAI(
         temperature=0,
         max_retries=3,
-        api_key="123",
-        base_url="http://localhost:1234/v1/",
-        model="google/gemma-3-12b",
+        base_url="http://localhost:1234/v1",
+        model="qwen/qwen3-8b",
     )
 
     agent = create_react_agent(llm, tools, prompt=SYSTEM_PROMPT)
@@ -148,7 +147,7 @@ def main():
     print("💬 开始问答演示")
     print("=" * 80)
 
-    question = "请基于知识库，概述 RAG 的优缺点，并给出引用。"
+    question = "请基于知识库，检索承德市医院资源"
     print(f"\n❓ 问题: {question}")
     print("\n🤔 Agent 思考与行动过程:")
     print("-" * 50)

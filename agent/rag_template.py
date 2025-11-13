@@ -22,8 +22,11 @@ from langchain_core.prompts.chat import PromptTemplate
 import requests
 import logging
 
-MODEL_URL = 'https://api.siliconflow.cn/v1'
-MODEL_NAME = 'Qwen/Qwen3-Next-80B-A3B-Instruct'
+# MODEL_URL = 'https://api.siliconflow.cn/v1'
+# MODEL_NAME = 'Qwen/Qwen3-Next-80B-A3B-Instruct'
+
+MODEL_URL = 'http://192.168.100.85:1234/v1'
+MODEL_NAME = 'google/gemma-3-12b'
 
 logging.basicConfig(
     filename='app.log',       # 写入文件
@@ -131,12 +134,12 @@ class DifyKnowledgeBaseController:
 kb_controller = DifyKnowledgeBaseController(
     base_url="http://localhost",
     api_key="dataset-XqsUQ5VQWkejtgJHFzEsZLar",
-    dataset_id="c5153abf-19b3-429b-9902-812dd85c8bfc"
+    dataset_id="f61a2250-27bd-4e6f-8815-6820c21d5dc1"
 )
 
 class QueryKBParams(BaseModel):
     query: str
-@tool(args_schema=QueryKBParams, description="根据问题在知识库中进行语义检索，返回候选片段列表")
+@tool(args_schema=QueryKBParams, description="根据问题在知识库中进行语义检索，返回候选片段列表。参数是查询字符串，不是json字符串")
 def query_knowledge_base(query: str) -> str:
     """根据问题在知识库中进行语义检索，返回候选片段列表"""
     try:
@@ -293,7 +296,7 @@ def 安防数据统计(area: str, start_date: str, end_date: str, groupby: str):
 # Workflow Engine
 # -------------------------------
 class LCWorkflowEngine:
-    def __init__(self, run_id, llm, tools, persistor: Persistor, system_prompt, max_iters=3):
+    def __init__(self, run_id, llm, tools, persistor: Persistor, system_prompt, max_iters=2):
         self.llm = llm
         self.persistor = persistor
         self.max_iters = max_iters
@@ -302,8 +305,7 @@ class LCWorkflowEngine:
         self.memory = ConversationBufferMemory(memory_key="chat_history")
         self.tools = tools
         self.system_prompt = system_prompt
-        agent = create_agent(model=self.llm, tools=self.tools, system_prompt=self.system_prompt)
-        self.agent = AgentExecutor(agent=agent, tools=tools, memory=self.memory, verbose=True, handle_parsing_errors=True)
+        self.agent = create_agent(model=self.llm, tools=self.tools, system_prompt=self.system_prompt)
 
     # 从持久化的trace中恢复对话历史
     def _restore_memory(self):
@@ -336,7 +338,8 @@ class LCWorkflowEngine:
         - 步骤不能依赖其他步骤的结果
         """
 
-    def run(self, user_query: str):
+    def run(self, user_query: object):
+        
         key = f"run:{self.run_id}"
         saved = self.persistor.load(key)
         if saved:
@@ -346,31 +349,42 @@ class LCWorkflowEngine:
         aggregated = []
         
         # TODO 如果是多个请求，则先生成plan，再将plan交给engine去执
-        plan = [user_query]
+        plan = [user_query['prompt']]
 
         while iter_count < self.max_iters:
             iter_count += 1
             # 恢复之前持久化的对话历史
             self._restore_memory()
             self._trace("loop_start", {"iter": iter_count, "plan": plan}, "")
+            out_answer = None
             for step in plan:
                 # 通过 Agent普通工具调用
                 try:
-                    out = self.agent.invoke({"input": step}, handle_tool_error=True)
-                    aggregated.append({"step":step,"output":_safe_serialize(out)})
-                    self._trace("executor_agent", {"step":step}, out)
+                    out_answer = self.agent.invoke({"messages": [("user", step)]},
+                        config={
+                            "recursion_limit": 10
+                        })
+                    aggregated.append({"step":step,"output":_safe_serialize(out_answer)})
+                    self._trace("executor_agent", {"step":step}, out_answer)
                 except Exception as e:
                     # 如果报错（通常是tool调用出错，则不调用tool继续执行）
                     logging.error({"step":step,"output":str(e)})
                     continue
+                
+            answer_content = "" if not out_answer else json.dumps(out_answer['messages'][-1].content, ensure_ascii=False)
 
             # Evaluator
             eval_prompt = f"""
-            你是 Evaluator，判断以下内容是否充分回答用户问题：
-            用户问题：{user_query}
-            聚合结果：
-            {json.dumps(aggregated, ensure_ascii=False)}
-            若充分请返回 OK，否则给出下一步明确要执行的动作。
+            你是 Evaluator，判断<检索结果>是否充分回答<用户问题>:
+            - 若充分请返回:OK
+            - 如果不充分，则进行以下动作：
+            将用户的问题进行重新组织，再去检索知识库，提高检索的准确率。例如之前<用户问题>为：合肥有什么好吃的呀？，则返回：请通过知识库检索，"合肥 美食"。
+            注意：只可以将原问题中的句子分解成词，或者变成同义词，但是不要添加额外的词。
+            
+            <用户问题>{user_query['origin']}</用户问题>
+            <检索结果>
+            {answer_content}
+            </检索结果>
             """
             eval_resp = self.llm.invoke(eval_prompt)
             decision_text = eval_resp.content
@@ -379,10 +393,13 @@ class LCWorkflowEngine:
             if "ok" in decision_text.lower() or "充分" in decision_text.lower():
                 answer_prompt = f"""
                 你是 Answer Composer，请基于聚合结果生成回答：
-                用户问题：{user_query}
-                聚合结果：
-                {json.dumps(aggregated, ensure_ascii=False)}
-                输出自然语言答案并列出引用来源。
+                用户问题：{user_query['origin']}
+                检索结果：
+                {json.dumps(out_answer['messages'][-1].content, ensure_ascii=False)}
+                输出自然语言答案。
+                注意：
+                - 请列出引用来源。
+                - 如果检索结果不是特别符合用户的问题，请说明原因。
                 """
                 final_answer = self.llm.invoke(answer_prompt)
                 self._trace("compose_answer", {}, final_answer)
@@ -390,6 +407,7 @@ class LCWorkflowEngine:
                 return {"status":"ok","answer":final_answer,"trace":self.trace}
             else:
                 plan = [decision_text.splitlines()[0]]
+                logging.info(f"[检索结果  [{answer_content}] 不满足，重新制检索计划,第 {iter_count + 1} 次] {decision_text}")
                 self._trace("plan_updated", {"new_plan":plan}, decision_text)
 
         self._trace("max_iters_exceeded", {}, "")
@@ -418,32 +436,30 @@ def demo():
     ]
     
     datasets_tools_name = [
-        'query_knowledge_base', 'read_file_chunks', 'list_datasets', 'list_files'
+        'query_knowledge_base',
+        # 'read_file_chunks', 
+        'list_datasets', 'list_files'
     ]
     
     SYSTEM_PROMPT = f"""你是一个智能助手，能使用工具回答用户问题。
-    工具列表：{{tools}}
-    工具名称：{{tool_names}}
-    思考记录：{{agent_scratchpad}}
-    用户问题：{{input}}
-    * 在检索知识库的时候，请使用以下几个工具来进行检索:{','.join(datasets_tools_name)}
+    * 如果用户要求检索知识库，请使用以下几个工具来进行检索:{','.join(datasets_tools_name)}
     遵循以下步骤：
-    1. 用 query_knowledge_base 搜索知识库中相关内容，获得候选文件和片段线索
-    2. 使用 read_file_chunks 精读最相关的2-3个片段内容作为证据
+    1. 用 query_knowledge_base 搜索知识库中相关内容，获得候选文件和片段线索。
+    {'2. 使用 read_file_chunks 精读最相关的2-3个片段内容作为证据' if 0 else ''}
     3. 基于读取的具体片段内容组织答案
-    4. 回答末尾用"引用："格式列出实际读取的fileId和chunkIndex
-    5. 回答末尾用"调用："格式列出实际调用的tool和参数
+    4. 回答末尾用"引用：documentId: response.documentId, segmentId: response.segmentId"格式列出实际读取的documentId和segmentId
+    5. 回答末尾用"调用：tools: [tool1, tool2]"格式列出实际调用的tool和参数
 
     重要规则：
     - 如果检索知识库的结果为空，例如 
     query_knowledge_base 返回为空数组 [] 或读取的文件片段内容为空，请不要继续调用其他工具，也不要根据自己的理解生成答案；
-    请直接回答："知识库中缺少相关信息，建议补充相关文档。"
+    请直接回答："未检索到相关内容，知识库中缺少相关信息。"
     - 你的所有回答都必须基于实际读取到的片段。
-    - 若找不到足够的证据，就明确说明“知识库中暂缺相关信息”。
+    - 若找不到足够的证据，将你检索到的内容通过文本组织成可读内容返回即可。
     - 优先选择评分高的搜索结果进行深入阅读。
-    - 如果实在找不到答案，就回答你不知道。
+    - 如果实在找不到答案，就回答"未检索到相关内容，知识库中缺少相关信息。"。
     
-    * 在使用API查询的时候，请使用以下几个工具来进行检索:{','.join(api_tools_name)}。你的任务是:
+    * 如果用户要求查询API，请使用以下几个工具来进行检索:{','.join(api_tools_name)}。你的任务是:
     - 根据要求组合查询条件，并从工具中选择合适的工具进行查询
     - 将工具查询结果数据通过专业的语言转达给用户
     对于查询条件数据中的字段，说明如下：
@@ -453,11 +469,18 @@ def demo():
     - groupby: 如果是按区域统计，则为'area', 如果按公司统计，则为'company', 如果按时间统计，则为'time'
     - 如果没有满足条件的API，可以放弃API查询环节，直接使用知识库检索的结果来回答问题。
     
-    如果仍然无法得到足够的证据，请直接回答："未检索到任何相关信息，建议补充相关文档及数据接口。"
+    工具列表：{{tools}}
+    工具名称：{{tool_names}}
+    思考记录：{{agent_scratchpad}}
+    用户问题：{{input}}
     """
 
     # 直接使用 @tool 装饰器的函数
-    tools = [query_knowledge_base, read_file_chunks, list_datasets, list_files, 能耗数据统计, 运营数据统计, 安防数据统计]
+    tools = [query_knowledge_base, 
+            # read_file_chunks, 
+            list_datasets, list_files
+            # , 能耗数据统计, 运营数据统计, 安防数据统计
+            ]
     
     # persistor = Persistor(method="sqlite", sqlite_path="agent_state.db")
     persistor = Persistor()
@@ -466,7 +489,8 @@ def demo():
                             system_prompt=SYSTEM_PROMPT
     )
     
-    query = "RAG是什么？"
+    query = {"origin": "查找承德市有哪些医生"}
+    query['prompt'] = f'请通过知识库检索,{query["origin"]}'
     
     res = engine.run(query)
     answer = res['answer']
