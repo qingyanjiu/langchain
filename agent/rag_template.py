@@ -23,10 +23,10 @@ import requests
 import logging
 
 # MODEL_URL = 'https://api.siliconflow.cn/v1'
-# MODEL_NAME = 'Qwen/Qwen3-Next-80B-A3B-Instruct'
+# MODEL_NAME = 'Qwen/Qwen3-30B-A3B-Instruct-2507'
 
 MODEL_URL = 'http://192.168.100.85:1234/v1'
-MODEL_NAME = 'google/gemma-3-12b'
+MODEL_NAME = 'qwen/qwen3-vl-8b'
 
 logging.basicConfig(
     filename='app.log',       # 写入文件
@@ -139,7 +139,7 @@ kb_controller = DifyKnowledgeBaseController(
 
 class QueryKBParams(BaseModel):
     query: str
-@tool(args_schema=QueryKBParams, description="根据问题在知识库中进行语义检索，返回候选片段列表。参数是查询字符串，不是json字符串")
+@tool(args_schema=QueryKBParams, description="根据问题在知识库中进行语义检索，返回候选片段列表")
 def query_knowledge_base(query: str) -> str:
     """根据问题在知识库中进行语义检索，返回候选片段列表"""
     try:
@@ -296,16 +296,19 @@ def 安防数据统计(area: str, start_date: str, end_date: str, groupby: str):
 # Workflow Engine
 # -------------------------------
 class LCWorkflowEngine:
-    def __init__(self, run_id, llm, tools, persistor: Persistor, system_prompt, max_iters=2):
+    def __init__(self, run_id, llm, tools, persistor: Persistor, system_prompt, max_iters=2, agent_recursion_limit = 5):
+        # agent 递归调用限制
+        self.agent_recursion_limit = agent_recursion_limit
         self.llm = llm
         self.persistor = persistor
+        # 流程迭代次数
         self.max_iters = max_iters
         self.run_id = str(uuid.uuid4()) if not run_id else run_id
         self.trace = []
         self.memory = ConversationBufferMemory(memory_key="chat_history")
         self.tools = tools
         self.system_prompt = system_prompt
-        self.agent = create_agent(model=self.llm, tools=self.tools, system_prompt=self.system_prompt)
+        self.agent = create_agent(model=self.llm, tools=self.tools, system_prompt=self.system_prompt, debug = False)
 
     # 从持久化的trace中恢复对话历史
     def _restore_memory(self):
@@ -327,6 +330,14 @@ class LCWorkflowEngine:
                     self.memory.chat_memory.add_user_message(step)
     def _trace(self, phase, meta, output):
         self.trace.append({"ts":time.time(),"phase":phase,"meta":meta,"output":output})
+        
+    # 兼容deepseek,删除think
+    def remove_think(self, content):
+        ret = content
+        if(len(content.split('</think>')) > 1):
+            ret = content.split('</think>')[1]
+            ret = content.replace('\n', '')
+        return ret
         
     def do_plan(self, user_query: str):
         plan_prompt = f"""
@@ -362,21 +373,26 @@ class LCWorkflowEngine:
                 try:
                     out_answer = self.agent.invoke({"messages": [("user", step)]},
                         config={
-                            "recursion_limit": 10
+                            "recursion_limit": self.agent_recursion_limit
                         })
                     aggregated.append({"step":step,"output":_safe_serialize(out_answer)})
                     self._trace("executor_agent", {"step":step}, out_answer)
                 except Exception as e:
                     # 如果报错（通常是tool调用出错，则不调用tool继续执行）
                     logging.error({"step":step,"output":str(e)})
-                    continue
-                
+                    continue 
+            
             answer_content = "" if not out_answer else json.dumps(out_answer['messages'][-1].content, ensure_ascii=False)
+            
+            # 删除可能的think标签
+            answer_content = self.remove_think(answer_content)   
 
             # Evaluator
             eval_prompt = f"""
-            你是 Evaluator，判断<检索结果>是否充分回答<用户问题>:
-            - 若充分请返回:OK
+            你是 Evaluator，判断<检索结果>是否充分回答<用户问题>,判断的依据是：答案中是否包含或者部分包含用户需要的信息。
+            1. 如果仅仅能部分回答时用户的问题，则返回 基本充分
+            2. 如果完全能够回答用户的问题，请返回 完全充分
+            3. 否则认为不充分。
             - 如果不充分，则进行以下动作：
             将用户的问题进行重新组织，再去检索知识库，提高检索的准确率。例如之前<用户问题>为：合肥有什么好吃的呀？，则返回：请通过知识库检索，"合肥 美食"。
             注意：只可以将原问题中的句子分解成词，或者变成同义词，但是不要添加额外的词。
@@ -389,17 +405,28 @@ class LCWorkflowEngine:
             eval_resp = self.llm.invoke(eval_prompt)
             decision_text = eval_resp.content
             self._trace("evaluator", {"aggregated_count":len(aggregated)}, decision_text)
+            
+            # 删除可能的think标签
+            decision_text = self.remove_think(decision_text)
+            
+            logging.info(f'检索结果是否充分评估结果：{decision_text}')
 
-            if "ok" in decision_text.lower() or "充分" in decision_text.lower():
+            if "完全充分" in decision_text.lower() or "基本充分" in decision_text.lower():
                 answer_prompt = f"""
                 你是 Answer Composer，请基于聚合结果生成回答：
                 用户问题：{user_query['origin']}
                 检索结果：
-                {json.dumps(out_answer['messages'][-1].content, ensure_ascii=False)}
+                {answer_content}
+                充分性评价：{decision_text}
                 输出自然语言答案。
                 注意：
-                - 请列出引用来源。
-                - 如果检索结果不是特别符合用户的问题，请说明原因。
+                - 保留refrence和tools信息
+                - 语句要通顺专业，围绕用户问题的主题来进行语言组织。
+                - 答案文本中不要包含任何引用数据，调用工具的内容，这些内容在返回数据的 refrences 和 tools 字段中显示。
+                - 最终格式如下: {{ "content": 答案文本, "references": {{"documentId": "xxx", "segmentId": "xxxx", "file": "xxx"}}, "tools": [tools] }}
+                注意： 
+                - 要返回严格的json对象字符串，不要返回任何其他多余的文本内容。
+                - 如果 充分性评价 为 完全充分，则返回最终的答案；如果是 基本充分 需要说明缺少的信息以及解释缺少信息的原因。
                 """
                 final_answer = self.llm.invoke(answer_prompt)
                 self._trace("compose_answer", {}, final_answer)
@@ -412,7 +439,23 @@ class LCWorkflowEngine:
 
         self._trace("max_iters_exceeded", {}, "")
         self.persist()
-        return {"status":"insufficient","answer":"多轮仍无法得到足够证据","trace":self.trace}
+        
+        # 告诉用户为何不满足
+        failed_answer_prompt = f"""
+        你是 Answer Composer，请基于检索结果生成回答：
+        用户问题：{user_query['origin']}
+        检索结果：
+        {answer_content}
+        输出自然语言答案。
+        注意：
+        - 因为检索结果不符合用户问题，所以请说明原因。
+        - 仅保留说明文字即可,将引用来源、实用工具等信息都去除掉。
+        
+        *** 最终的数据格式如下: 
+        {{ "content": 答案文本, "references": {{"documentId": "xxx", "segmentId": "xxxx", "file": "xxx"}}, "tools": [tools] }}
+        """
+        failed_answer = self.llm.invoke(failed_answer_prompt)
+        return {"answer": failed_answer}
 
     def persist(self):
         key = f"run:{self.run_id}"
@@ -422,6 +465,25 @@ class LCWorkflowEngine:
 # -------------------------------
 # Demo
 # -------------------------------
+
+# 清理返回数据
+def get_json_from_answer(content):
+    import re
+    answer = content
+    
+    # 清除可能的json markdown 外壳
+    pattern = r"```json(.*?)```"
+    match = re.search(pattern, answer, re.DOTALL)
+    if match:
+        answer = match.group(1).strip()
+    else:
+        # 可能前面有特殊字符
+        # 删除第一个大括号前面所有的字符
+        idx = answer.find("{")
+        if (idx != -1):
+            answer = answer[idx:].strip()
+    return answer
+
 def demo():
     agent_llm = ChatOpenAI(
         # api_key="123",
@@ -444,11 +506,14 @@ def demo():
     SYSTEM_PROMPT = f"""你是一个智能助手，能使用工具回答用户问题。
     * 如果用户要求检索知识库，请使用以下几个工具来进行检索:{','.join(datasets_tools_name)}
     遵循以下步骤：
-    1. 用 query_knowledge_base 搜索知识库中相关内容，获得候选文件和片段线索。
+    1. 用 query_knowledge_base 搜索知识库中相关内容，获得候选文件和片段线索
     {'2. 使用 read_file_chunks 精读最相关的2-3个片段内容作为证据' if 0 else ''}
     3. 基于读取的具体片段内容组织答案
-    4. 回答末尾用"引用：documentId: response.documentId, segmentId: response.segmentId"格式列出实际读取的documentId和segmentId
-    5. 回答末尾用"调用：tools: [tool1, tool2]"格式列出实际调用的tool和参数
+    4. 回答末尾注明 refrences: {{documentId: response.documentId, segmentId: response.segmentId}}
+    5. 回答末尾注明 tools: 调用的工具列表
+    6. 回家末尾注明 file: {{file_name}}
+    *** 最终的数据格式如下: 
+    - 最终格式如下: {{ "content": 答案文本, "references": {{"documentId": "xxx", "segmentId": "xxxx", "file": "xxx"}}, "tools": [tools] }}
 
     重要规则：
     - 如果检索知识库的结果为空，例如 
@@ -489,12 +554,17 @@ def demo():
                             system_prompt=SYSTEM_PROMPT
     )
     
-    query = {"origin": "查找承德市有哪些医生"}
+    query = {"origin": "承德市有哪些隐蔽工程"}
     query['prompt'] = f'请通过知识库检索,{query["origin"]}'
     
     res = engine.run(query)
-    answer = res['answer']
-    print(answer)
+    answer = res['answer'].content
+    
+    # 清理返回数据
+    answer = get_json_from_answer(answer)
+
+    answer_json = json.loads(answer)
+    print(answer_json)
 
 if __name__=="__main__":
     demo()
