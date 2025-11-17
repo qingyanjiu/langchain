@@ -9,6 +9,7 @@ LangChain + @tool 版增强 Agent 工作流
 - 持久化：JSON / SQLite
 """
 
+from dify_datasets_controller import DifyKnowledgeBaseController
 import json, time, uuid, os
 from typing import List
 from langchain_openai import ChatOpenAI
@@ -19,14 +20,13 @@ from langchain_classic.memory import ConversationBufferMemory
 from pydantic import BaseModel, Field
 from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage, AIMessage
 from langchain_core.prompts.chat import PromptTemplate
-import requests
 import logging
 
-# MODEL_URL = 'https://api.siliconflow.cn/v1'
-# MODEL_NAME = 'Qwen/Qwen3-Next-80B-A3B-Instruct'
+MODEL_URL = 'https://api.siliconflow.cn/v1'
+MODEL_NAME = 'Qwen/Qwen3-Next-80B-A3B-Instruct'
 
-MODEL_URL = 'http://192.168.100.85:1234/v1'
-MODEL_NAME = 'qwen/qwen3-vl-8b'
+# MODEL_URL = 'http://192.168.100.85:1234/v1'
+# MODEL_NAME = 'qwen/qwen3-vl-8b'
 
 logging.basicConfig(
     filename='app.log',       # 写入文件
@@ -92,61 +92,14 @@ class Persistor:
 # 工具
 # -------------------------------
 
-# ======== 定义知识库控制器 ========
-class DifyKnowledgeBaseController:
-    def __init__(self, base_url: str, api_key: str, dataset_id: str, api_token: str):
-        self.base_url = base_url.rstrip("/")
-        self.headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-        self.dataset_id = dataset_id
-        self.api_token = api_token
-
-    def search(self, query: str):
-        """调用 Dify 检索接口"""
-        url = f"{self.base_url}/v1/datasets/{self.dataset_id}/retrieve"
-        resp = requests.post(url, headers=self.headers, json={"query": query})
-        resp.raise_for_status()
-        return resp.json().get("records", [])
-
-    def list_files(self, page: int = 1, page_size: int = 100):
-        """列出知识库文件"""
-        url = f"{self.base_url}/v1/datasets/{self.dataset_id}/documents?page={page}&limit={page_size}"
-        resp = requests.get(url, headers=self.headers)
-        resp.raise_for_status()
-        return resp.json().get("data", [])
-
-    def list_datasets(self, page: int = 1, page_size: int = 100):
-        """获取知识库列表信息"""
-        url = f"{self.base_url}/v1/datasets?page={page}&limit={page_size}"
-        resp = requests.get(url, headers=self.headers)
-        resp.raise_for_status()
-        return resp.json().get("data", [])
-
-    def read_file_chunks(self, doc_id: str, page: int = 1, limit: int = 1):
-        """读取文件的分段内容"""
-        # 这个接口特殊，需要走自带的api接口，所以key要登录去拿
-        headers = {
-            "Authorization": f"Bearer {self.api_token}",
-            "Content-Type": "multipart/form-data"
-        }
-        url = f"{self.base_url}/console/api/datasets/{self.dataset_id}/documents/{doc_id}/segments?page={page}&limit={limit}"
-        resp = requests.get(url, headers=headers)
-        resp.raise_for_status()
-        return resp.json().get("data", [])
-
 # ======== 初始化知识库控制器 ========
 # kb_controller = DifyKnowledgeBaseController(
 #     base_url="http://localhost",
-#     api_key="dataset-XqsUQ5VQWkejtgJHFzEsZLar",
 #     dataset_id="f61a2250-27bd-4e6f-8815-6820c21d5dc1"
 # )
 kb_controller = DifyKnowledgeBaseController(
     base_url="http://192.168.100.85",
-    api_key="dataset-XqsUQ5VQWkejtgJHFzEsZLar",
-    dataset_id="2c2b721d-365b-4ad6-ac7d-c3cdd601c742",
-    api_token='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiNDBlMDFlMzUtOTIzOC00MmQ1LTgyMDYtNjAxYWUzYWM3MDI5IiwiZXhwIjoxNzYzMzU3NjMzLCJpc3MiOiJTRUxGX0hPU1RFRCIsInN1YiI6IkNvbnNvbGUgQVBJIFBhc3Nwb3J0In0.nUB9ghoximla_qLosUj-mFMgW8Js8Q8kSv4u8YiwNo4'
+    dataset_id="2c2b721d-365b-4ad6-ac7d-c3cdd601c742"
 )
 
 class QueryKBParams(BaseModel):
@@ -158,6 +111,7 @@ def query_knowledge_base(query: str) -> str:
         results = kb_controller.search(query)
         # 包含文本过短的，过滤掉
         results = [r for r in results if len(r['segment']['content']) > 10]
+        logging.info(f"query_knowledge_base检索知识库结果：{results}")
     except Exception as e:
         logging.error(f"Error querying knowledge base: {e}")
         return "查询知识库时出错，请稍后再试"
@@ -193,6 +147,7 @@ def read_file_chunks(doc_id: str, chunk_start: int, chunk_end: int) -> str:
             chunk_data = kb_controller.read_file_chunks(doc_id, page=chunk_no)
             chunk_content = chunk_data[0]['content']
             results["messages"][0]['content'] += f'{chunk_content}\n'
+        logging.info(f'read_file_chunks：{results["messages"][0]["content"][:100]}...')
     except Exception as e:
         logging.error(f"Error reading file chunks: {e}")
         return "读取文件分段内容时出错，请稍后再试"
