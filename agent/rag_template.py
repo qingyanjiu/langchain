@@ -23,7 +23,7 @@ import requests
 import logging
 
 # MODEL_URL = 'https://api.siliconflow.cn/v1'
-# MODEL_NAME = 'Qwen/Qwen3-30B-A3B-Instruct-2507'
+# MODEL_NAME = 'Qwen/Qwen3-Next-80B-A3B-Instruct'
 
 MODEL_URL = 'http://192.168.100.85:1234/v1'
 MODEL_NAME = 'qwen/qwen3-vl-8b'
@@ -94,13 +94,14 @@ class Persistor:
 
 # ======== 定义知识库控制器 ========
 class DifyKnowledgeBaseController:
-    def __init__(self, base_url: str, api_key: str, dataset_id: str):
+    def __init__(self, base_url: str, api_key: str, dataset_id: str, api_token: str):
         self.base_url = base_url.rstrip("/")
         self.headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
         self.dataset_id = dataset_id
+        self.api_token = api_token
 
     def search(self, query: str):
         """调用 Dify 检索接口"""
@@ -123,27 +124,40 @@ class DifyKnowledgeBaseController:
         resp.raise_for_status()
         return resp.json().get("data", [])
 
-    def read_file_chunks(self, doc_id: str):
+    def read_file_chunks(self, doc_id: str, page: int = 1, limit: int = 1):
         """读取文件的分段内容"""
-        url = f"{self.base_url}/v1/datasets/{self.dataset_id}/documents/{doc_id}/segments"
-        resp = requests.get(url, headers=self.headers)
+        # 这个接口特殊，需要走自带的api接口，所以key要登录去拿
+        headers = {
+            "Authorization": f"Bearer {self.api_token}",
+            "Content-Type": "multipart/form-data"
+        }
+        url = f"{self.base_url}/console/api/datasets/{self.dataset_id}/documents/{doc_id}/segments?page={page}&limit={limit}"
+        resp = requests.get(url, headers=headers)
         resp.raise_for_status()
         return resp.json().get("data", [])
 
 # ======== 初始化知识库控制器 ========
+# kb_controller = DifyKnowledgeBaseController(
+#     base_url="http://localhost",
+#     api_key="dataset-XqsUQ5VQWkejtgJHFzEsZLar",
+#     dataset_id="f61a2250-27bd-4e6f-8815-6820c21d5dc1"
+# )
 kb_controller = DifyKnowledgeBaseController(
-    base_url="http://localhost",
+    base_url="http://192.168.100.85",
     api_key="dataset-XqsUQ5VQWkejtgJHFzEsZLar",
-    dataset_id="f61a2250-27bd-4e6f-8815-6820c21d5dc1"
+    dataset_id="2c2b721d-365b-4ad6-ac7d-c3cdd601c742",
+    api_token='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiNDBlMDFlMzUtOTIzOC00MmQ1LTgyMDYtNjAxYWUzYWM3MDI5IiwiZXhwIjoxNzYzMzU3NjMzLCJpc3MiOiJTRUxGX0hPU1RFRCIsInN1YiI6IkNvbnNvbGUgQVBJIFBhc3Nwb3J0In0.nUB9ghoximla_qLosUj-mFMgW8Js8Q8kSv4u8YiwNo4'
 )
 
 class QueryKBParams(BaseModel):
     query: str
-@tool(args_schema=QueryKBParams, description="根据问题在知识库中进行语义检索，返回候选片段列表")
+@tool(args_schema=QueryKBParams, description="根据问题在知识库中进行语义检索，返回候选片段列表。参数是一个由数字、字母、-组成的字符串，不包含任何其他字符。")
 def query_knowledge_base(query: str) -> str:
     """根据问题在知识库中进行语义检索，返回候选片段列表"""
     try:
         results = kb_controller.search(query)
+        # 包含文本过短的，过滤掉
+        results = [r for r in results if len(r['segment']['content']) > 10]
     except Exception as e:
         logging.error(f"Error querying knowledge base: {e}")
         return "查询知识库时出错，请稍后再试"
@@ -160,16 +174,25 @@ def list_datasets() -> str:
     return json.dumps(results, ensure_ascii=False, indent=2)
 
 class ReadFileChunksParams(BaseModel):
-    doc_ids: List[str]
-@tool(args_schema=ReadFileChunksParams, description="读取指定文件的所有分段内容")
-def read_file_chunks(doc_ids: List[str]) -> str:
+    doc_id: str
+    chunk_start: int
+    chunk_end: int
+@tool(args_schema=ReadFileChunksParams, description='''
+    读取指定文件的所有分段内容，作用是从文档中检索复数个分段的内容。
+    doc_id为文档ID；
+    chunk_start为要检索的文档的开始分段编号，
+    chunk_end为要检索的文档的结束分段编号
+    ''')
+def read_file_chunks(doc_id: str, chunk_start: int, chunk_end: int) -> str:
     """读取指定文件的所有分段内容"""
-    if not doc_ids:
-        return "请提供文件ID数组"
-    results = {}
+    if not doc_id:
+        return "请提供文档ID"
+    results = {"messages": [{"role": "system", "content": ""}]}
     try:
-        for doc_id in doc_ids:
-            results[doc_id] = kb_controller.read_file_chunks(doc_id)
+        for chunk_no in range(chunk_start, chunk_end + 1):
+            chunk_data = kb_controller.read_file_chunks(doc_id, page=chunk_no)
+            chunk_content = chunk_data[0]['content']
+            results["messages"][0]['content'] += f'{chunk_content}\n'
     except Exception as e:
         logging.error(f"Error reading file chunks: {e}")
         return "读取文件分段内容时出错，请稍后再试"
@@ -296,7 +319,7 @@ def 安防数据统计(area: str, start_date: str, end_date: str, groupby: str):
 # Workflow Engine
 # -------------------------------
 class LCWorkflowEngine:
-    def __init__(self, run_id, llm, tools, persistor: Persistor, system_prompt, max_iters=2, agent_recursion_limit = 5):
+    def __init__(self, run_id, llm, tools, persistor: Persistor, system_prompt, max_iters=2, agent_recursion_limit = 10):
         # agent 递归调用限制
         self.agent_recursion_limit = agent_recursion_limit
         self.llm = llm
@@ -389,11 +412,10 @@ class LCWorkflowEngine:
 
             # Evaluator
             eval_prompt = f"""
-            你是 Evaluator，判断<检索结果>是否充分回答<用户问题>,判断的依据是：答案中是否包含或者部分包含用户需要的信息。
+            你是 Evaluator，判断<检索结果>是否充分回答<用户问题>,判断的依据是：根据你的专业知识，判断答案的含义是否与用户问题基本在一个维度上。
             1. 如果仅仅能部分回答时用户的问题，则返回 基本充分
             2. 如果完全能够回答用户的问题，请返回 完全充分
-            3. 否则认为不充分。
-            - 如果不充分，则进行以下动作：
+            3. 否则进行以下动作：
             将用户的问题进行重新组织，再去检索知识库，提高检索的准确率。例如之前<用户问题>为：合肥有什么好吃的呀？，则返回：请通过知识库检索，"合肥 美食"。
             注意：只可以将原问题中的句子分解成词，或者变成同义词，但是不要添加额外的词。
             
@@ -499,19 +521,26 @@ def demo():
     
     datasets_tools_name = [
         'query_knowledge_base',
-        # 'read_file_chunks', 
+        'read_file_chunks', 
         'list_datasets', 'list_files'
     ]
     
     SYSTEM_PROMPT = f"""你是一个智能助手，能使用工具回答用户问题。
     * 如果用户要求检索知识库，请使用以下几个工具来进行检索:{','.join(datasets_tools_name)}
     遵循以下步骤：
-    1. 用 query_knowledge_base 搜索知识库中相关内容，获得候选文件和片段线索
-    {'2. 使用 read_file_chunks 精读最相关的2-3个片段内容作为证据' if 0 else ''}
-    3. 基于读取的具体片段内容组织答案
-    4. 回答末尾注明 refrences: {{documentId: response.documentId, segmentId: response.segmentId}}
-    5. 回答末尾注明 tools: 调用的工具列表
-    6. 回家末尾注明 file: {{file_name}}
+    1. 用 query_knowledge_base 搜索知识库中相关内容，获得候选文件和片段线索，结果中请选取最符合用户问题的片段来作为证据。
+    {'''
+    2. 使用 read_file_chunks 精读最相关的2-3个片段内容作为证据。具体做法是:
+    - 先获取第一步检索到的内容的chunk编号
+    - 判断内容，决定你要向前检索还是向后检索
+    - 如果向前检索，则 read_file_chunks 的 start_chunk_id 则设置为当前检索到文件的chunk编号小的数字,实际可以减去2或者3
+    - 如果向后检索，则 read_file_chunks 的 start_chunk_id 则设置为当前检索到文件的chunk编号大的数字,实际可以加上2或者3
+    - 从返回的文本结果中，找出最适合回答用户问题的答案，通过语言组织之后返回。
+    注意： 不要编造没有检索到的内容。
+    ''' if 1 else ''}
+    3. 回答末尾注明 refrences: {{documentId: response.documentId, segmentId: response.segmentId}}
+    4. 回答末尾注明 tools: 调用的工具列表
+    5. 回家末尾注明 file: {{file_name}}
     *** 最终的数据格式如下: 
     - 最终格式如下: {{ "content": 答案文本, "references": {{"documentId": "xxx", "segmentId": "xxxx", "file": "xxx"}}, "tools": [tools] }}
 
@@ -542,7 +571,7 @@ def demo():
 
     # 直接使用 @tool 装饰器的函数
     tools = [query_knowledge_base, 
-            # read_file_chunks, 
+            read_file_chunks, 
             list_datasets, list_files
             # , 能耗数据统计, 运营数据统计, 安防数据统计
             ]
@@ -554,8 +583,8 @@ def demo():
                             system_prompt=SYSTEM_PROMPT
     )
     
-    query = {"origin": "承德市有哪些隐蔽工程"}
-    query['prompt'] = f'请通过知识库检索,{query["origin"]}'
+    query = {"origin": "以人为本，安全第一"}
+    query['prompt'] = f'请通过知识库检索:{query["origin"]}'
     
     res = engine.run(query)
     answer = res['answer'].content
