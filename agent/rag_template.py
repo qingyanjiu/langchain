@@ -22,11 +22,11 @@ from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage, AI
 from langchain_core.prompts.chat import PromptTemplate
 import logging
 
-MODEL_URL = 'https://api.siliconflow.cn/v1'
-MODEL_NAME = 'Qwen/Qwen3-Next-80B-A3B-Instruct'
+# MODEL_URL = 'https://api.siliconflow.cn/v1'
+# MODEL_NAME = 'Qwen/Qwen3-Next-80B-A3B-Instruct'
 
-# MODEL_URL = 'http://192.168.100.85:1234/v1'
-# MODEL_NAME = 'qwen/qwen3-vl-8b'
+MODEL_URL = 'http://192.168.100.85:1234/v1'
+MODEL_NAME = 'qwen/qwen3-vl-8b'
 
 logging.basicConfig(
     filename='app.log',       # 写入文件
