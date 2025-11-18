@@ -43,7 +43,7 @@ class DifyKnowledgeBaseController:
         resp.raise_for_status()
         return resp.json().get("data", [])
 
-    def read_file_chunks(self, doc_id: str):
+    def get_document_segments(self, doc_id: str):
         """读取文件的分段内容"""
         url = f"{self.base_url}/v1/datasets/{self.dataset_id}/documents/{doc_id}/segments"
         resp = requests.get(url, headers=self.headers)
@@ -75,14 +75,14 @@ def list_datasets() -> str:
     return json.dumps(results, ensure_ascii=False, indent=2)
 
 
-@tool("read_file_chunks")
-def read_file_chunks(doc_ids: List[str]) -> str:
+@tool("get_document_segments")
+def get_document_segments(doc_ids: List[str]) -> str:
     """读取指定文件的所有分段内容"""
     if not doc_ids:
         return "请提供文件ID数组"
     results = {}
     for doc_id in doc_ids:
-        results[doc_id] = kb_controller.read_file_chunks(doc_id)
+        results[doc_id] = kb_controller.get_document_segments(doc_id)
     return json.dumps(results, ensure_ascii=False, indent=2)
 
 
@@ -97,12 +97,12 @@ def list_files(page: int = 1, page_size: int = 10) -> str:
 def create_agentic_rag_system():
     """创建 Agentic RAG 系统"""
 
-    tools = [query_knowledge_base, read_file_chunks, list_files]
+    tools = [query_knowledge_base, get_document_segments, list_files]
 
     SYSTEM_PROMPT = """你是一个 Agentic RAG 助手。请遵循以下策略逐步收集证据后回答：
 
 1. 用 query_knowledge_base 搜索知识库中相关内容，获得候选文件和片段线索
-2. 使用 read_file_chunks 精读最相关的2-3个片段内容作为证据
+2. 使用 get_document_segments 精读最相关的2-3个片段内容作为证据
 3. 基于读取的具体片段内容组织答案
 4. 回答末尾用"引用："格式列出实际读取的fileId和chunkIndex
 5. 回答末尾用"调用："格式列出实际调用的tool和参数
