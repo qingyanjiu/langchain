@@ -4,6 +4,8 @@
 key.sh
 *.log
 .DS_Store
+__pychache__/
+.pyc
 *.json
 *.png
 !dify-login-config.json
