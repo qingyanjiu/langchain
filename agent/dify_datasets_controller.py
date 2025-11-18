@@ -29,7 +29,7 @@ class DifyKnowledgeBaseController:
         resp.raise_for_status()
         return resp.json().get("records", [])
 
-    def list_files(self, page: int = 1, page_size: int = 100):
+    def list_documents(self, page: int = 1, page_size: int = 100):
         """列出知识库文件"""
         url = f"{self.base_url}/v1/datasets/{self.dataset_id}/documents?page={page}&limit={page_size}"
         resp = requests.get(url, headers=self.headers)
@@ -43,7 +43,7 @@ class DifyKnowledgeBaseController:
         resp.raise_for_status()
         return resp.json().get("data", [])
 
-    def read_file_segments(self, doc_id: str, page: int = 1, limit: int = 1):
+    def get_document_segmentss(self, doc_id: str, page: int = 1, limit: int = 1):
         """读取文档的分段内容"""
         url = f"{self.base_url}/v1/datasets/{self.dataset_id}/documents/{doc_id}/segments?status=completed&page={page}&limit={limit}"
         resp = requests.get(url, headers=self.headers)
