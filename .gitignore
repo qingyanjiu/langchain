@@ -7,3 +7,4 @@ key.sh
 *.json
 *.png
 !dify-config*.json
+*.pyc

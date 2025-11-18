@@ -29,8 +29,9 @@ MODEL_URL = 'http://192.168.100.85:1234/v1'
 MODEL_NAME = 'qwen/qwen3-vl-8b'
 
 logging.basicConfig(
-    filename='app.log',       # 写入文件
-    filemode='a',             # 追加模式，可改为 'w' 覆盖
+    filename='app.log',
+    # 追加模式 'a'，覆盖模式 'w' 
+    filemode='w',
     level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(name)s - %(message)s'
 )
@@ -92,13 +93,6 @@ class Persistor:
 # 工具
 # -------------------------------
 
-def _get_config(self) -> dict:
-    config = {}
-    with open(self.config_file_path, 'r') as f:
-        config = json.loads(f.read())
-    return config
-
-config = _get_config('agent/dify-config-85.json')
 # ======== 初始化知识库控制器 ========
 # kb_controller = DifyKnowledgeBaseController(
 #     base_url="http://localhost",
@@ -106,7 +100,7 @@ config = _get_config('agent/dify-config-85.json')
 # )
 kb_controller = DifyKnowledgeBaseController(
     base_url="http://192.168.100.85",
-    dataset_id="2c2b721d-365b-4ad6-ac7d-c3cdd601c742"
+    dataset_id="43303f7d-681a-46e2-b992-0ca9dcc5fc51"
 )
 
 class QueryKBParams(BaseModel):
