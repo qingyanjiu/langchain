@@ -289,8 +289,9 @@ class LCWorkflowEngine:
         self.system_prompt = system_prompt
         self.agent = create_agent(model=self.llm, tools=self.tools, system_prompt=self.system_prompt, debug = False)
 
-    # 从持久化的trace中恢复对话历史11\5////////////1                                                                    \
-        # \\\\\\\\\\\\\\\trace，把历史对话按顺序添加到 memory（只找最近5条）
+    # 从持久化的trace中恢复对话历史
+    def _restore_memory(self):
+        # 遍历 trace，把历史对话按顺序添加到 memory（只找最近5条）
         for entry in self.trace[-5:]:
             if entry['phase'] == 'executor_agent':
                 # entry['output'] 可以是 AIMessage 或字符串
