@@ -6,4 +6,12 @@ key.sh
 .DS_Store
 *.json
 *.png
-!dify-login-config.json
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+*.pyd
+*.swp
+.env
+.venv/
+!dify-config*.json

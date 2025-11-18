@@ -29,7 +29,7 @@ class DifyKnowledgeBaseController:
         resp.raise_for_status()
         return resp.json().get("records", [])
 
-    def list_files(self, page: int = 1, page_size: int = 100):
+    def list_documents(self, page: int = 1, page_size: int = 100):
         """列出知识库文件"""
         url = f"{self.base_url}/v1/datasets/{self.dataset_id}/documents?page={page}&limit={page_size}"
         resp = requests.get(url, headers=self.headers)
@@ -43,15 +43,9 @@ class DifyKnowledgeBaseController:
         resp.raise_for_status()
         return resp.json().get("data", [])
 
-    def read_file_chunks(self, doc_id: str, page: int = 1, limit: int = 1):
-        """读取文件的分段内容"""
-        # 这个接口特殊，需要走自带的api接口，所以key要登录去拿
-        token = self.dify_login_helper.get_access_token()
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "multipart/form-data"
-        }
-        url = f"{self.base_url}/console/api/datasets/{self.dataset_id}/documents/{doc_id}/segments?page={page}&limit={limit}"
-        resp = requests.get(url, headers=headers)
+    def get_document_segmentss(self, doc_id: str, page: int = 1, limit: int = 1):
+        """读取文档的分段内容"""
+        url = f"{self.base_url}/v1/datasets/{self.dataset_id}/documents/{doc_id}/segments?status=completed&page={page}&limit={limit}"
+        resp = requests.get(url, headers=self.headers)
         resp.raise_for_status()
         return resp.json().get("data", [])
