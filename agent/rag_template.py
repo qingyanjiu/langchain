@@ -127,30 +127,30 @@ def list_datasets() -> str:
         return "获取知识库列表时出错，请稍后再试"
     return json.dumps(results, ensure_ascii=False, indent=2)
 
-class ReadFileChunksParams(BaseModel):
+class ReadFilesegmentsParams(BaseModel):
     doc_id: str
-    chunk_start: int
-    chunk_end: int
-@tool(args_schema=ReadFileChunksParams, description='''
-    读取指定文件的所有分段内容，作用是从文档中检索复数个分段的内容。
+    segment_start: int
+    segment_end: int
+@tool(args_schema=ReadFilesegmentsParams, description='''
+    读取指定文档的所有分段内容，作用是从文档中检索复数个分段的内容。
     doc_id为文档ID；
-    chunk_start为要检索的文档的开始分段编号，
-    chunk_end为要检索的文档的结束分段编号
+    segment_start为要检索的文档的开始分段编号，
+    segment_end为要检索的文档的结束分段编号
     ''')
-def read_file_chunks(doc_id: str, chunk_start: int, chunk_end: int) -> str:
-    """读取指定文件的所有分段内容"""
+def read_file_segments(doc_id: str, segment_start: int, segment_end: int) -> str:
+    """读取指定文档的所有分段内容"""
     if not doc_id:
         return "请提供文档ID"
     results = {"messages": [{"role": "system", "content": ""}]}
     try:
-        for chunk_no in range(chunk_start, chunk_end + 1):
-            chunk_data = kb_controller.read_file_chunks(doc_id, page=chunk_no)
-            chunk_content = chunk_data[0]['content']
-            results["messages"][0]['content'] += f'{chunk_content}\n'
-        logging.info(f'read_file_chunks：{results["messages"][0]["content"][:100]}...')
+        for segment_no in range(segment_start, segment_end + 1):
+            segment_data = kb_controller.read_file_segments(doc_id, page=segment_no)
+            segment_content = segment_data[0]['content']
+            results["messages"][0]['content'] += f'{segment_content}\n'
+        logging.info(f'read_file_segments：{results["messages"][0]["content"][:100]}...')
     except Exception as e:
-        logging.error(f"Error reading file chunks: {e}")
-        return "读取文件分段内容时出错，请稍后再试"
+        logging.error(f"Error reading file segments: {e}")
+        return "读取文档分段内容时出错，请稍后再试"
     return json.dumps(results, ensure_ascii=False, indent=2)
 
 
@@ -158,14 +158,14 @@ class ListFilesParams(BaseModel):
     page: int = 1
     page_size: int = 10
 
-@tool(args_schema=ListFilesParams, description="列出当前知识库中的文件，返回文件ID、文件名和chunk数")
+@tool(args_schema=ListFilesParams, description="列出当前知识库中的文档，返回文档ID、文档名和segment数")
 def list_files(page: int = 1, page_size: int = 10) -> str:
-    """列出当前知识库中的文件，返回文件ID、文件名和chunk数"""
+    """列出当前知识库中的文档，返回文档ID、文档名和segment数"""
     try:
         results = kb_controller.list_files(page, page_size)
     except Exception as e:
         logging.error(f"Error listing files: {e}")
-        return "列出文件时出错，请稍后再试"
+        return "列出文档时出错，请稍后再试"
     return json.dumps(results, ensure_ascii=False, indent=2)
 
 # =========== API查询工具 ==========
@@ -475,20 +475,20 @@ def demo():
     
     datasets_tools_name = [
         'query_knowledge_base',
-        'read_file_chunks', 
+        'read_file_segments', 
         'list_datasets', 'list_files'
     ]
     
     SYSTEM_PROMPT = f"""你是一个智能助手，能使用工具回答用户问题。
     * 如果用户要求检索知识库，请使用以下几个工具来进行检索:{','.join(datasets_tools_name)}
     遵循以下步骤：
-    1. 用 query_knowledge_base 搜索知识库中相关内容，获得候选文件和片段线索，结果中请选取最符合用户问题的片段来作为证据。
+    1. 用 query_knowledge_base 搜索知识库中相关内容，获得候选文档和片段线索，结果中请选取最符合用户问题的片段来作为证据。
     {'''
-    2. 使用 read_file_chunks 精读最相关的2-3个片段内容作为证据。具体做法是:
-    - 先获取第一步检索到的内容的chunk编号
+    2. 使用 read_file_segments 精读最相关的2-3个片段内容作为证据。具体做法是:
+    - 先获取第一步检索到的内容的segment编号
     - 判断内容，决定你要向前检索还是向后检索
-    - 如果向前检索，则 read_file_chunks 的 start_chunk_id 则设置为当前检索到文件的chunk编号小的数字,实际可以减去2或者3
-    - 如果向后检索，则 read_file_chunks 的 start_chunk_id 则设置为当前检索到文件的chunk编号大的数字,实际可以加上2或者3
+    - 如果向前检索，则 read_file_segments 的 start_segment_id 则设置为当前检索到文档的segment编号小的数字,实际可以减去2或者3
+    - 如果向后检索，则 read_file_segments 的 start_segment_id 则设置为当前检索到文档的segment编号大的数字,实际可以加上2或者3
     - 从返回的文本结果中，找出最适合回答用户问题的答案，通过语言组织之后返回。
     注意： 不要编造没有检索到的内容。
     ''' if 1 else ''}
@@ -500,7 +500,7 @@ def demo():
 
     重要规则：
     - 如果检索知识库的结果为空，例如 
-    query_knowledge_base 返回为空数组 [] 或读取的文件片段内容为空，请不要继续调用其他工具，也不要根据自己的理解生成答案；
+    query_knowledge_base 返回为空数组 [] 或读取的文档片段内容为空，请不要继续调用其他工具，也不要根据自己的理解生成答案；
     请直接回答："未检索到相关内容，知识库中缺少相关信息。"
     - 你的所有回答都必须基于实际读取到的片段。
     - 若找不到足够的证据，将你检索到的内容通过文本组织成可读内容返回即可。
@@ -525,7 +525,7 @@ def demo():
 
     # 直接使用 @tool 装饰器的函数
     tools = [query_knowledge_base, 
-            read_file_chunks, 
+            read_file_segments, 
             list_datasets, list_files
             # , 能耗数据统计, 运营数据统计, 安防数据统计
             ]
