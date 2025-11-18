@@ -4,7 +4,7 @@ import json
 import requests
 
 class DifyLoginHelper:
-    def __init__(self, config_file_path: str = 'dify-login-config.json'):
+    def __init__(self, config_file_path: str = 'dify-config.json'):
         self.config_file_path = config_file_path
         self.config = self._get_config()
         self.redis_client = self._get_redis_client()

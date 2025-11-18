@@ -7,6 +7,10 @@
         "password": ""
     },
     "dify": {
+        "host": "192.168.100.85",
+        "port": 80,
+        "username": "hx@hx.com",
+        "password": "hxkj2025",
         "datasets_api_key": "dataset-XqsUQ5VQWkejtgJHFzEsZLar"
     }
 }

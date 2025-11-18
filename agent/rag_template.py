@@ -98,8 +98,8 @@ class Persistor:
 #     dataset_id="f61a2250-27bd-4e6f-8815-6820c21d5dc1"
 # )
 kb_controller = DifyKnowledgeBaseController(
-    base_url="http://192.168.100.85",
-    dataset_id="2c2b721d-365b-4ad6-ac7d-c3cdd601c742"
+    base_url="http://localhost",
+    dataset_id="3bffe394-7f5e-462e-bb4c-d3091403e11c"
 )
 
 class QueryKBParams(BaseModel):

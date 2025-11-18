@@ -7,6 +7,10 @@
         "password": ""
     },
     "dify": {
+        "host": "localhost",
+        "port": 80,
+        "username": "101147784@qq.com",
+        "password": "19831226lC",
         "datasets_api_key": "dataset-XqsUQ5VQWkejtgJHFzEsZLar"
     }
 }
