@@ -30,7 +30,7 @@ MODEL_NAME = 'qwen/qwen3-vl-8b'
 
 logging.basicConfig(
     filename='app.log',       # 写入文件
-    filemode='a',             # 追加模式，可改为 'w' 覆盖
+    filemode='w',             # 追加模式，可改为 'w' 覆盖
     level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - %(name)s - %(message)s'
 )

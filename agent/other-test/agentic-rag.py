@@ -29,7 +29,7 @@ class DifyKnowledgeBaseController:
         resp.raise_for_status()
         return resp.json().get("records", [])
 
-    def list_files(self, page: int = 1, page_size: int = 100):
+    def list_documents(self, page: int = 1, page_size: int = 100):
         """列出知识库文件"""
         url = f"{self.base_url}/v1/datasets/{self.dataset_id}/documents?page={page}&limit={page_size}"
         resp = requests.get(url, headers=self.headers)
@@ -86,10 +86,10 @@ def get_document_segments(doc_ids: List[str]) -> str:
     return json.dumps(results, ensure_ascii=False, indent=2)
 
 
-@tool("list_files")
-def list_files(page: int = 1, page_size: int = 10) -> str:
+@tool("list_documents")
+def list_documents(page: int = 1, page_size: int = 10) -> str:
     """列出当前知识库中的文件，返回文件ID、文件名和chunk数"""
-    results = kb_controller.list_files(page, page_size)
+    results = kb_controller.list_documents(page, page_size)
     return json.dumps(results, ensure_ascii=False, indent=2)
 
 
@@ -97,7 +97,7 @@ def list_files(page: int = 1, page_size: int = 10) -> str:
 def create_agentic_rag_system():
     """创建 Agentic RAG 系统"""
 
-    tools = [query_knowledge_base, get_document_segments, list_files]
+    tools = [query_knowledge_base, get_document_segments, list_documents]
 
     SYSTEM_PROMPT = """你是一个 Agentic RAG 助手。请遵循以下策略逐步收集证据后回答：
 
@@ -137,7 +137,7 @@ def main():
     datasets = kb_controller.list_datasets()
     for dataset in datasets:
         print(f"  - {dataset.get('id')} | {dataset.get('name')} | 文档数: {dataset.get('document_count', '未知')}")
-        documents = kb_controller.list_files(dataset.get('id'))
+        documents = kb_controller.list_documents(dataset.get('id'))
         for document in documents:
             print("\n📚 文档列表：")
             print(f"  - {document.get('id')} | {document.get('name')} | token数: {document.get('tokens', '未知')}")

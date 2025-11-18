@@ -5,5 +5,13 @@ key.sh
 *.log
 .DS_Store
 *.json
-*.png
+*.pn
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+*.pyd
+*.swp
+.env
+.venv/
 !dify-config*.json
