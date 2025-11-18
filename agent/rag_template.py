@@ -92,6 +92,13 @@ class Persistor:
 # 工具
 # -------------------------------
 
+def _get_config(self) -> dict:
+    config = {}
+    with open(self.config_file_path, 'r') as f:
+        config = json.loads(f.read())
+    return config
+
+config = _get_config('agent/dify-config-85.json')
 # ======== 初始化知识库控制器 ========
 # kb_controller = DifyKnowledgeBaseController(
 #     base_url="http://localhost",
@@ -99,7 +106,7 @@ class Persistor:
 # )
 kb_controller = DifyKnowledgeBaseController(
     base_url="http://192.168.100.85",
-    dataset_id="2c2b721d-365b-4ad6-ac7d-c3cdd601c742"
+    dataset_id=config['dify']['dataset_id']
 )
 
 class QueryKBParams(BaseModel):
