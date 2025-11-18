@@ -6,4 +6,4 @@ key.sh
 .DS_Store
 *.json
 *.png
-!dify-login-config.json
+!dify-config*.json

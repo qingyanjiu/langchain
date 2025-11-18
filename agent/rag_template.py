@@ -106,7 +106,7 @@ config = _get_config('agent/dify-config-85.json')
 # )
 kb_controller = DifyKnowledgeBaseController(
     base_url="http://192.168.100.85",
-    dataset_id=config['dify']['dataset_id']
+    dataset_id="2c2b721d-365b-4ad6-ac7d-c3cdd601c742"
 )
 
 class QueryKBParams(BaseModel):
