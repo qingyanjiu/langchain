@@ -60,5 +60,5 @@ class DifyLoginHelper:
         return token
 
 # if __name__ == '__main__':
-#     helper = DifyLoginHelper(config_file_path='agent/dify-login-config.json')
+#     helper = DifyLoginHelper(config_file_path='agent/dify-config-85.json')
 #     helper.do_dify_login()
