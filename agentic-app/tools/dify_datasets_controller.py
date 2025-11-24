@@ -1,5 +1,4 @@
 import json
-from dify_login_helper import DifyLoginHelper
 import requests
 
 # ======== 定义知识库控制器 ========
@@ -7,8 +6,7 @@ class DifyKnowledgeBaseController:
     def __init__(self, base_url: str, dataset_id: str):
         self.base_url = base_url.rstrip("/")
         self.dataset_id = dataset_id
-        self.config_file_path = 'agent/dify-config-85.json'
-        self.dify_login_helper = DifyLoginHelper(config_file_path = self.config_file_path)
+        self.config_file_path = 'dify-config.json'
         self.dify_config = self._get_config()
         self.headers = {
             "Authorization": f"Bearer {self.dify_config['datasets_api_key']}",

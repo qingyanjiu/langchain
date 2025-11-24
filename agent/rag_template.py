@@ -138,17 +138,17 @@ class ReadFilesegmentsParams(BaseModel):
     segment_start为要检索的文档的开始分段编号，
     segment_end为要检索的文档的结束分段编号
     ''')
-def get_document_segmentss(doc_id: str, segment_start: int, segment_end: int) -> str:
+def get_document_segments(doc_id: str, segment_start: int, segment_end: int) -> str:
     """读取指定文档的所有分段内容"""
     if not doc_id:
         return "请提供文档ID"
     results = {"messages": [{"role": "system", "content": ""}]}
     try:
         for segment_no in range(segment_start, segment_end + 1):
-            segment_data = kb_controller.get_document_segmentss(doc_id, page=segment_no)
+            segment_data = kb_controller.get_document_segments(doc_id, page=segment_no)
             segment_content = segment_data[0]['content']
             results["messages"][0]['content'] += f'{segment_content}\n'
-        logging.info(f'get_document_segmentss：{results["messages"][0]["content"][:100]}...')
+        logging.info(f'get_document_segments：{results["messages"][0]["content"][:100]}...')
     except Exception as e:
         logging.error(f"Error reading file segments: {e}")
         return "读取文档分段内容时出错，请稍后再试"
@@ -477,7 +477,7 @@ def demo():
     
     datasets_tools_name = [
         'query_knowledge_base',
-        'get_document_segmentss', 
+        'get_document_segments', 
         'list_datasets', 'list_documents'
     ]
     
@@ -486,11 +486,11 @@ def demo():
     遵循以下步骤：
     1. 用 query_knowledge_base 搜索知识库中相关内容，获得候选文档和片段线索，结果中请选取最符合用户问题的片段来作为证据。
     {'''
-    2. 使用 get_document_segmentss 精读最相关的2-3个片段内容作为证据。具体做法是:
+    2. 使用 get_document_segments 精读最相关的2-3个片段内容作为证据。具体做法是:
     - 先获取第一步检索到的内容的segment编号
     - 判断内容，决定你要向前检索还是向后检索
-    - 如果向前检索，则 get_document_segmentss 的 start_segment_id 则设置为当前检索到文档的segment编号小的数字,实际可以减去2或者3
-    - 如果向后检索，则 get_document_segmentss 的 start_segment_id 则设置为当前检索到文档的segment编号大的数字,实际可以加上2或者3
+    - 如果向前检索，则 get_document_segments 的 start_segment_id 则设置为当前检索到文档的segment编号小的数字,实际可以减去2或者3
+    - 如果向后检索，则 get_document_segments 的 start_segment_id 则设置为当前检索到文档的segment编号大的数字,实际可以加上2或者3
     - 从返回的文本结果中，找出最适合回答用户问题的答案，通过语言组织之后返回。
     注意： 不要编造没有检索到的内容。
     ''' if 1 else ''}
@@ -527,7 +527,7 @@ def demo():
 
     # 直接使用 @tool 装饰器的函数
     tools = [query_knowledge_base, 
-            get_document_segmentss, 
+            get_document_segments, 
             list_datasets, list_documents
             # , 能耗数据统计, 运营数据统计, 安防数据统计
             ]
