@@ -35,8 +35,8 @@ def _safe_serialize(obj):
 MODEL_URL = 'https://api.siliconflow.cn/v1'
 MODEL_NAME = 'Qwen/Qwen3-Next-80B-A3B-Instruct'
 
-# MODEL_URL = "http://localhost:1234/v1"
-# MODEL_NAME = "qwen/qwen3-8b"
+# MODEL_URL = "http://192.168.100.85:1234/v1"
+# MODEL_NAME = "qwen/qwen3-vl-8b"
 
 # 全局模型和工具
 llm = create_llm(
@@ -69,16 +69,17 @@ async def agent_ws(websocket: WebSocket, user_id: str):
             async for chunk in rag_executor.stream_run(query):
                 text = _safe_serialize(chunk)
                 # 如果是最后结束的消息，直接拿message
-                if(text['event'] in ('on_chain_end', 'on_chain_stream') and 'output' in text['data'] and text['name'] == 'executor_agent'):
+                if(text['event'] == 'on_chain_end'
+                    and 'output' in text['data'] 
+                    and text['name'] == 'executor_agent'):
                     # 取最后 messagetext['name'] == 'executor_agent'):
                     output_json = {
                         "event": "final_answer", 
-                        "data": json.loads(text['data']['output']['model']['messages'][-1]['content'])
+                        "data": text['data']['output']['messages'][-1]['content']
                     }
-                    await websocket.send_text(json.dumps(output_json))
-                else:
-                    await websocket.send_text(json.dumps(text))
-            await websocket.send_text(json.dumps({"status": "done"}))
+                await websocket.send_text(json.dumps(text))
+                
+            await websocket.send_text(json.dumps({"status": "done", "data": output_json}))
             
             logging.info(f"query done -- {user_id}")
 

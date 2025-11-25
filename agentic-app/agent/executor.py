@@ -27,7 +27,7 @@ class AgentExecutorWrapper:
         self.memory_store.append_trace(self.user_id, "executor_agent", {"query": query}, str(output))
         return output
 
-    async def stream_run(self, query: str, version="v1"):
+    async def stream_run(self, query: str, version="v2"):
         """
         异步流式调用 agent，基于 astream_events
         """
