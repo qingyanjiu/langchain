@@ -40,25 +40,42 @@ class LangGraphPipeline:
         self.system_prompt = system_prompt
         self.run_id = run_id
         self.max_iters = max_iters
+        self.agent_wrapper = AgentExecutorWrapper(
+            llm=self.llm,
+            tools=self.tools,
+            memory_store=self.memory_store,
+            user_id=self.run_id,
+            system_prompt=self.system_prompt
+        )
 
         # 定义图
         flow_graph = StateGraph(MyState)
 
         # 节点：Agent,处理主要逻辑
-        def agent_node(state: MyState, config: RunnableConfig, runtime: Runtime) -> MyState:
+        async def agent_node(state: MyState, config: RunnableConfig, runtime: Runtime, writer: StreamWriter) -> MyState:
             logging.info(f"第 {state['evaluator_iter']} 次迭代，处理主要逻辑")
             query = state["query"]
-            agent_wrapper = AgentExecutorWrapper(
-                llm=self.llm,
-                tools=self.tools,
-                memory_store=self.memory_store,
-                user_id=self.run_id,
-                system_prompt=self.system_prompt
-            )
+
             # 如果没超过最大迭代次数，则迭代，否则，啥都不做，也就是使用上一次的结果(不改变 state 中的 agent_output)
             if(state["evaluator_iter"] < self.max_iters):
-                # AgentExecutorWrapper 是同步 run，如果你也有异步版本，这里用 await
-                agent_out = agent_wrapper.run(query)
+                ##############################
+                # AgentExecutorWrapper 同步 run
+                ##############################
+                # agent_out = agent_wrapper.run(query)
+                # return {"agent_output": agent_out}
+
+                agent_out = ''
+                async for chunk in self.agent_wrapper.stream_run(query):
+                    event = chunk['event']
+                    if(event.find('tool') != -1):
+                        writer(chunk)
+                    if(
+                        # 思考链结束事件，且整个agent结束，认为是该节点完成的标志，输出chunk并获取最终的output，写入state
+                        event == 'on_chain_end'
+                        and chunk['name'] == self.agent_wrapper.agent_name
+                    ):
+                        writer(chunk)
+                        agent_out = chunk['data']['output']
                 return {"agent_output": agent_out}
 
         # 节点：Evaluator，评估检索效果，决定是否迭代
@@ -106,6 +123,7 @@ Agent 回答: {agent_out}
 - 输出的答案必须基于检索结果，不能重复。
 - 输出的答案必须基于用户问题，不能重复。
 - 如果充分性评价是基本充分，请根据你的判断大概说明一下不完全充分的可能原因。
+- 如果充分性评价是完全充分，就不要添加任何关于充分性评价的内容。
 """
             final_answer = ""
             # LLM 调用
@@ -113,8 +131,8 @@ Agent 回答: {agent_out}
                 [{"role": "system", "content": composer_prompt}],
                 config=config
             ):
-                # 流式写最终 result
-                writer(chunk.content)
+                # 流式写最终 result，给个type是answer方便前端判断最终结果的流式响应
+                writer({"type": "answer", "content": chunk.content})
                 final_answer += chunk.content
             return {"final_answer": final_answer}
 

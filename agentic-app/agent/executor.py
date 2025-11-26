@@ -4,16 +4,17 @@ from langchain.agents import create_agent
 from memory.store import MemoryStore
 
 class AgentExecutorWrapper:
-    def __init__(self, llm, tools, memory_store: MemoryStore, user_id, system_prompt=None, agent_recursion_limit=10):
+    def __init__(self, llm, tools, memory_store: MemoryStore, user_id, agent_name='custom_agent', system_prompt=None, agent_recursion_limit=10):
         self.llm = llm
         self.tools = tools
         self.user_id = user_id
         self.memory_store = memory_store
         self.memory = memory_store.get_memory(user_id)
         self.agent_recursion_limit = agent_recursion_limit
+        self.agent_name = agent_name
 
-        self.agent = create_agent(model=llm, tools=tools, system_prompt=system_prompt, debug=False, name="executor_agent")
-        self.executor = create_agent(model=llm, tools=tools, system_prompt=system_prompt, debug=False, name="executor_agent")
+        self.agent = create_agent(model=llm, tools=tools, system_prompt=system_prompt, debug=False, name=self.agent_name)
+        self.executor = create_agent(model=llm, tools=tools, system_prompt=system_prompt, debug=False, name=self.agent_name)
         # self.executor = AgentExecutor(agent=self.agent, tools=tools, memory=self.memory, verbose=True)
 
     def run(self, query: str):
