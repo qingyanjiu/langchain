@@ -2,7 +2,6 @@
 
 import json
 from fastapi import FastAPI, WebSocket
-from memory.store import MemoryStore
 from agent.executor import AgentExecutorWrapper
 from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage, AIMessage, AIMessageChunk
 from models.llm import openai_llm

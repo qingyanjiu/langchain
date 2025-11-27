@@ -204,3 +204,5 @@ Agent 回答: {agent_out}
                     "event": "custom",
                     "data": chunk
                 }
+        
+        self.agent_wrapper.memory_store.persist_user(self.run_id)

@@ -1,7 +1,6 @@
 from langchain_classic.agents import AgentExecutor, create_openai_tools_agent
 from langchain.agents import create_agent
 from langchain_core.prompts.chat import ChatPromptTemplate, MessagesPlaceholder, SystemMessagePromptTemplate, HumanMessagePromptTemplate
-
 from memory.store import MemoryStore
 
 # 写文件肯定会有并发问题，要改成redis或者数据库持久化历史s
@@ -12,7 +11,8 @@ class AgentExecutorWrapper:
         self.llm = llm
         self.tools = tools
         self.user_id = user_id
-        self.memory = memory_store.get_memory(user_id)
+        self.memory_store = memory_store
+        self.memory = self.memory_store.get_memory(user_id)
         self.agent_recursion_limit = agent_recursion_limit
         self.agent_name = agent_name
 
@@ -37,7 +37,7 @@ class AgentExecutorWrapper:
                 "recursion_limit": self.agent_recursion_limit
             }
         )
-        memory_store.append_trace(self.user_id, "executor_agent", {"query": query}, str(output))
+        self.memory_store.persist_user(self.user_id, self.agent_name, {"query": query}, str(output))
         return output
 
     async def stream_run(self, query: str, version="v2"):
@@ -53,13 +53,6 @@ class AgentExecutorWrapper:
             config={
                 "recursion_limit": self.agent_recursion_limit
             }):
-            if(
-                # 思考链结束事件，且整个agent结束，认为是该节点完成的标志，将对话历史持久化
-                chunk['event'] == 'on_chain_end'
-                and chunk['name'] == self.agent_name
-            ):
-                answer = chunk['data']['output']['messages'][-1].content
-                memory_store.append_trace(self.user_id, self.agent_name, {"query": query}, answer)
             # event 是一个 dict，包含 event["event"]，event["data"] 等
             # 可以根据事件类型过滤，只输出 token 或最终答案
             yield chunk
