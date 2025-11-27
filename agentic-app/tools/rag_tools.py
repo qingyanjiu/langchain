@@ -17,7 +17,7 @@ logging.basicConfig(
 # -------------------------------
 
 kb_controller = DifyKnowledgeBaseController(
-    base_url="http://localhost",
+    base_url="http://host.docker.internal",
     dataset_id="7f0d26c3-dbe8-44a3-9ee0-541430244052"
 )
 

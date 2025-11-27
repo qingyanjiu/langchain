@@ -20,7 +20,6 @@ logging.basicConfig(
 )
 
 app = FastAPI()
-memory_store = MemoryStore()
 
 # MODEL_URL = 'https://api.siliconflow.cn/v1'
 # MODEL_NAME = 'Qwen/Qwen3-Next-80B-A3B-Instruct'
@@ -54,7 +53,6 @@ async def agent_ws(websocket: WebSocket, user_id: str):
     # rag_executor = AgentExecutorWrapper(
     #     llm=llm,
     #     tools=RAG_TOOLS,
-    #     memory_store=memory_store,
     #     user_id=user_id,
     #     system_prompt=SYSTEM_PROMPT
     # )
@@ -63,7 +61,6 @@ async def agent_ws(websocket: WebSocket, user_id: str):
     rag_pipeline = LangGraphPipeline(
         llm=llm,
         tools=RAG_TOOLS,
-        memory_store=memory_store,
         system_prompt=SYSTEM_PROMPT,
         run_id=user_id
     )

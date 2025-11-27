@@ -33,17 +33,15 @@ class MyState(TypedDict, total=False):
     final_answer: Dict[str, Any]
 
 class LangGraphPipeline:
-    def __init__(self, llm: BaseChatModel, tools, memory_store: MemoryStore, system_prompt: str, run_id: str, max_iters: int = 3):
+    def __init__(self, llm: BaseChatModel, tools, system_prompt: str, run_id: str, max_iters: int = 3):
         self.llm = llm
         self.tools = tools
-        self.memory_store = memory_store
         self.system_prompt = system_prompt
         self.run_id = run_id
         self.max_iters = max_iters
         self.agent_wrapper = AgentExecutorWrapper(
             llm=self.llm,
             tools=self.tools,
-            memory_store=self.memory_store,
             user_id=self.run_id,
             system_prompt=self.system_prompt
         )

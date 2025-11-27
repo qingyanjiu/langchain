@@ -37,8 +37,6 @@ SYSTEM_PROMPT = f"""你是一个智能助手，能使用工具回答用户问题
     ''' if 0 else ''
     }
     
-    工具列表：{{tools}}
-    工具名称：{{tool_names}}
     思考记录：{{agent_scratchpad}}
     用户问题：{{input}}
     """

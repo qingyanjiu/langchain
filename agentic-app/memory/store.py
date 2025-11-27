@@ -45,7 +45,7 @@ class MemoryStore:
 
     def get_memory(self, user_id: str):
         if user_id not in self.store:
-            self.store[user_id] = ConversationBufferMemory(memory_key="chat_history")
+            self.store[user_id] = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
             saved = self.persistor.load(user_id)
             if saved:
                 # 恢复对话
