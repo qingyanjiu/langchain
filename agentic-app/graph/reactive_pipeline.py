@@ -12,7 +12,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage, AI
 import logging
 
 '''
-一般的RAG查询AGENT
+带交互的API查询流程（动态tool读取）
 '''
 
 logging.basicConfig(
@@ -56,6 +56,7 @@ class LangGraphPipeline:
         # 节点：Agent,处理主要逻辑
         async def agent_node(state: MyState, config: RunnableConfig, runtime: Runtime, writer: StreamWriter) -> MyState:
             logging.info(f"第 {state['evaluator_iter']} 次迭代，处理主要逻辑")
+            
             query = state["query"]
 
             # 如果没超过最大迭代次数，则迭代，否则，啥都不做，也就是使用上一次的结果(不改变 state 中的 agent_output)

@@ -7,7 +7,9 @@ from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage, AI
 from models.llm import openai_llm
 from tools.rag_tools import TOOLS as RAG_TOOLS
 from agent.rag_prompts import SYSTEM_PROMPT
-from graph.graph_pipeline import LangGraphPipeline
+# from graph.graph_pipeline import LangGraphPipeline
+from graph.reactive_pipeline import LangGraphPipeline
+from dynamic_tools.file_dynamic_tool import FileDynamicTool
 import logging
 
 logging.basicConfig(
@@ -56,10 +58,14 @@ async def agent_ws(websocket: WebSocket, user_id: str):
     #     system_prompt=SYSTEM_PROMPT
     # )
     
+    # 动态获取工具
+    fileDynamicTool = FileDynamicTool(call_tool_token='dataset-3dwC5VAiVum9GooOuN3ZlKpE')
+    tools = fileDynamicTool.generate_tools()
+    
     # 创建langgraph pipeline
     rag_pipeline = LangGraphPipeline(
         llm=llm,
-        tools=RAG_TOOLS,
+        tools=tools,
         system_prompt=SYSTEM_PROMPT,
         run_id=user_id
     )
