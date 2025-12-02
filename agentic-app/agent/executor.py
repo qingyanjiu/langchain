@@ -7,12 +7,13 @@ from memory.store import MemoryStore
 memory_store = MemoryStore()
 
 class AgentExecutorWrapper:
-    def __init__(self, llm, tools, user_id, agent_name='custom_agent', system_prompt=None, agent_recursion_limit=10):
+    def __init__(self, llm, tools, user_id, session_id, agent_name='custom_agent', system_prompt=None, agent_recursion_limit=10):
         self.llm = llm
         self.tools = tools
         self.user_id = user_id
+        self.session_id = session_id
         self.memory_store = memory_store
-        self.memory = self.memory_store.get_memory(user_id)
+        self.memory = self.memory_store.get_memory(user_id, session_id)
         self.agent_recursion_limit = agent_recursion_limit
         self.agent_name = agent_name
 
@@ -37,7 +38,6 @@ class AgentExecutorWrapper:
                 "recursion_limit": self.agent_recursion_limit
             }
         )
-        self.memory_store.persist_user(self.user_id, self.agent_name, {"query": query}, str(output))
         return output
 
     async def stream_run(self, query: str, version="v2"):

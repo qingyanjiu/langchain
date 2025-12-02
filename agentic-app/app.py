@@ -4,13 +4,14 @@ import json
 from fastapi import FastAPI, WebSocket
 from agent.executor import AgentExecutorWrapper
 from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage, AIMessage, AIMessageChunk
-from models.llm import openai_llm
+from models.llm import CustomLLMFactory
 from tools.rag_tools import TOOLS as RAG_TOOLS
-from agent.rag_prompts import SYSTEM_PROMPT
+from tools.system_tools import TOOLS as SYSTEM_TOOLS
 # from graph.graph_pipeline import LangGraphPipeline
 from graph.reactive_pipeline import LangGraphPipeline
 from dynamic_tools.file_dynamic_tool import FileDynamicTool
 import logging
+import uuid
 
 logging.basicConfig(
     filename='app.log',
@@ -22,17 +23,9 @@ logging.basicConfig(
 
 app = FastAPI()
 
-# MODEL_URL = 'https://api.siliconflow.cn/v1'
-# MODEL_NAME = 'Qwen/Qwen3-Next-80B-A3B-Instruct'
-
-MODEL_URL = "http://192.168.100.85:1234/v1"
-MODEL_NAME = "qwen/qwen3-vl-8b"
-
 # 全局模型和工具
-llm = openai_llm(
-    base_url=MODEL_URL,
-    model=MODEL_NAME
-)
+llm_factory = CustomLLMFactory()
+llm = llm_factory.llms['local']
 
 
 def _safe_serialize(obj):
@@ -46,8 +39,8 @@ def _safe_serialize(obj):
     else:
         return obj
 
-@app.websocket("/agentic_rag_query/{user_id}")
-async def agent_ws(websocket: WebSocket, user_id: str):
+@app.websocket("/agentic_rag_query/{user_id}/{session_id}")
+async def agent_ws(websocket: WebSocket, user_id: str, session_id: str):
     await websocket.accept()
 
     # 为当前用户创建独立的 AgentExecutor
@@ -58,16 +51,26 @@ async def agent_ws(websocket: WebSocket, user_id: str):
     #     system_prompt=SYSTEM_PROMPT
     # )
     
-    # 动态获取工具
+    '''
+    @@@@@@@@@@@@@@@@@@@@@@@@
+    动态获取工具 dynamic_tools
+    @@@@@@@@@@@@@@@@@@@@@@@@
+    '''
     fileDynamicTool = FileDynamicTool(call_tool_token='dataset-3dwC5VAiVum9GooOuN3ZlKpE')
     tools = fileDynamicTool.generate_tools()
+    # @@@ 测试工具
+    tools = SYSTEM_TOOLS
+    
+    # 新对话，生成新的sessionid
+    if (not session_id):
+        session_id = uuid.uuid4()
     
     # 创建langgraph pipeline
     rag_pipeline = LangGraphPipeline(
         llm=llm,
         tools=tools,
-        system_prompt=SYSTEM_PROMPT,
-        run_id=user_id
+        user_id=user_id,
+        session_id=session_id
     )
 
     while True:

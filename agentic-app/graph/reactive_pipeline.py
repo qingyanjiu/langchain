@@ -9,10 +9,11 @@ from memory.store import MemoryStore
 from agent.executor import AgentExecutorWrapper
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage, AIMessage
+from agent.info_check_prompts import SYSTEM_PROMPT
 import logging
 
 '''
-带交互的API查询流程（动态tool读取）
+带交互的API查询流程
 '''
 
 logging.basicConfig(
@@ -37,16 +38,18 @@ class MyState(TypedDict, total=False):
     final_answer: Dict[str, Any]
 
 class LangGraphPipeline:
-    def __init__(self, llm: BaseChatModel, tools, system_prompt: str, run_id: str, max_iters: int = 3):
+    def __init__(self, llm: BaseChatModel, tools, user_id: str, session_id: str, max_iters: int = 3):
         self.llm = llm
         self.tools = tools
-        self.system_prompt = system_prompt
-        self.run_id = run_id
+        self.system_prompt = SYSTEM_PROMPT
+        self.user_id = user_id
+        self.session_id = session_id
         self.max_iters = max_iters
         self.agent_wrapper = AgentExecutorWrapper(
             llm=self.llm,
             tools=self.tools,
-            user_id=self.run_id,
+            user_id=self.user_id,
+            session_id=self.session_id,
             system_prompt=self.system_prompt
         )
 
@@ -80,6 +83,8 @@ class LangGraphPipeline:
                         writer(chunk)
                         agent_out = chunk['data']['output']
                 return {"agent_output": agent_out}
+            else:
+                return {"agent_output": "达到最大循环次数，未获取到答案"}
 
         # 节点：Evaluator，评估检索效果，决定是否迭代
         def evaluator_node(state: MyState, config: RunnableConfig, runtime: Runtime) -> MyState:
@@ -179,7 +184,10 @@ Agent 回答: {agent_out}
         self.graph = flow_graph.compile()
         gen_flow_graph(self.graph)
 
-    # 流式调用langgraph，流式返回最终节点数据
+    '''
+    流式调用langgraph，流式返回最终节点数据
+    数据格式 {"query": "用户问题", "sessionId": "对话id"}
+    '''
     async def astream_run(self, query: str):
         # 初始 state
         # evaluator_iter: 评估节点迭代次数，不能超过 max_iters
@@ -210,4 +218,4 @@ Agent 回答: {agent_out}
                     "data": chunk
                 }
         
-        self.agent_wrapper.memory_store.persist_user(self.run_id)
+        self.agent_wrapper.memory_store.persist_user(self.user_id, self.session_id)
