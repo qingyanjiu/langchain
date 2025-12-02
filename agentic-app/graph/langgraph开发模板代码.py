@@ -13,7 +13,7 @@ from agent.rag_prompts import SYSTEM_PROMPT
 import logging
 
 '''
-一般的langgraph模版代码
+一般的langgraph模版代码,开发新流程的时候可以用来参考
 '''
 
 logging.basicConfig(

@@ -2,7 +2,10 @@ from tools.system_tools import TOOLS
 from tools.system_tools import TOOL_NAMES
 
 '''
+@@@@@@@@@@@
+agent会有交互，不是直接回答问题，而是会要求用户补全信息。同时使用通用工具获取必要信息
 agent会根据用户要求判断是否缺少参数，如果缺少，会要求用户补全需要的系统参数来调用工具查询
+@@@@@@@@@@@
 '''
 
 SYSTEM_PROMPT = f"""你是一个智能助手，能使用工具回答用户问题, 你可以选择使用以下几个工具:{','.join(TOOL_NAMES)}。
