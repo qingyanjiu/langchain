@@ -8,7 +8,7 @@ from models.llm import CustomLLMFactory
 from tools.rag_tools import TOOLS as RAG_TOOLS
 from tools.system_tools import TOOLS as SYSTEM_TOOLS
 # from graph.graph_pipeline import LangGraphPipeline
-from graph.reactive_pipeline import LangGraphPipeline
+from graph.reactive_pipeline import InfoDoubleCheckPipeline
 from dynamic_tools.file_dynamic_tool import FileDynamicTool
 import logging
 import uuid
@@ -66,11 +66,12 @@ async def agent_ws(websocket: WebSocket, user_id: str, session_id: str):
         session_id = uuid.uuid4()
     
     # 创建langgraph pipeline
-    rag_pipeline = LangGraphPipeline(
+    rag_pipeline = InfoDoubleCheckPipeline(
         llm=llm,
         tools=tools,
         user_id=user_id,
-        session_id=session_id
+        session_id=session_id,
+        use_evaluator=False
     )
 
     while True:

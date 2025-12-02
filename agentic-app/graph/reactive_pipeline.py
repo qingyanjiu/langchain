@@ -1,15 +1,11 @@
 from typing import TypedDict, Optional, Dict, Any
-
-from langchain_core.messages import HumanMessage
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import StreamWriter
 from langgraph.runtime import Runtime
 from langchain_core.runnables.config import RunnableConfig
-from memory.store import MemoryStore
 from agent.executor import AgentExecutorWrapper
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage, AIMessage
-from agent.info_check_prompts import SYSTEM_PROMPT
+from agent.info_double_check_prompts import SYSTEM_PROMPT
 import logging
 
 '''
@@ -37,13 +33,22 @@ class MyState(TypedDict, total=False):
     eval_decision: str
     final_answer: Dict[str, Any]
 
-class LangGraphPipeline:
-    def __init__(self, llm: BaseChatModel, tools, user_id: str, session_id: str, max_iters: int = 3):
+class InfoDoubleCheckPipeline:
+    '''
+    llm: 大模型
+    tools: agent要用的工具
+    user_id: 用户id，用来持久化对话历史
+    session_id: 对话id，用来持久化对话历史
+    max_iters: 流程评估不通过时的迭代次数
+    use_evaluator: 是否启用评估节点
+    '''
+    def __init__(self, llm: BaseChatModel, tools, user_id: str, session_id: str, use_evaluator = True, max_iters: int = 3):
         self.llm = llm
         self.tools = tools
         self.system_prompt = SYSTEM_PROMPT
         self.user_id = user_id
         self.session_id = session_id
+        self.use_evaluator = use_evaluator
         self.max_iters = max_iters
         self.agent_wrapper = AgentExecutorWrapper(
             llm=self.llm,
@@ -117,7 +122,11 @@ Agent 回答: {agent_out}
         async def composer_node(state: MyState, config: RunnableConfig, runtime: Runtime, writer: StreamWriter) -> MyState:
             logging.info(f"第 {state['evaluator_iter']} 次迭代，组织最终答案")
             # writer 是 LangGraph 提供的流写工具，可以流式输出自定义数据
-            decision = state["eval_decision"]
+            
+            # @@@@@@@@@@@@@ 
+            # 如果使用评估节点，则获取评估节点评估结果，否则默认是完全充分
+            # @@@@@@@@@@@@@
+            decision = state["eval_decision"] if self.use_evaluator else '完全充分'
             agent_out = state["agent_output"]
             agent_out = agent_out['messages'][-1].content
             composer_prompt = f"""
@@ -146,37 +155,56 @@ Agent 回答: {agent_out}
 
 
         flow_graph.add_node("Agent", agent_node)
-        flow_graph.add_node("Evaluator", evaluator_node)
+        
+        # @@@@@@@@@@@@@ 
+        # 如果使用评估节点，增加评估节点
+        # @@@@@@@@@@@@@
+        if (self.use_evaluator):
+            flow_graph.add_node("Evaluator", evaluator_node)
+            
         flow_graph.add_node("Composer", composer_node)
 
         # 添加边：控制流程
         # START → Agent
         flow_graph.add_edge(START, "Agent")
-        # Agent → Evaluator
-        flow_graph.add_edge("Agent", "Evaluator")
         
-        # 路径分支逻辑
-        # 如果充分 Evaluator → Composer 
-        # 不充分 Evaluator → Agent
-        def should_redo_rag_after_evaluation(state: MyState) -> str:
-            """
-            判断是否需要重新执行 RAG 步骤
-            """            
-            logging.info("路由判断 state:", state)
-            if(state["eval_decision"] == "不充分"):
-                return "redo_rag"
-            elif(state["eval_decision"] in ("完全充分", "基本充分")):
-                return "do_compose"
+        # @@@@@@@@@@@@@ 
+        # 如果使用评估节点,agent节点到评估节点连线
+        # @@@@@@@@@@@@@
+        if (self.use_evaluator):
+            # Agent → Evaluator
+            flow_graph.add_edge("Agent", "Evaluator")
+        # @@@@@@@@@@@@@ 
+        # 如果不使用评估节点,agent节点到总结节点连线
+        # @@@@@@@@@@@@@
+        else:
+            flow_graph.add_edge("Agent", "Composer")
         
-        # 添加条件边
-        flow_graph.add_conditional_edges(
-            "Evaluator",
-            should_redo_rag_after_evaluation,
-            {
-                "redo_rag": "Agent",
-                "do_compose": "Composer"
-            }
-        )
+        # @@@@@@@@@@@@@ 
+        # 如果使用评估节点, 添加评估节点条件边
+        # @@@@@@@@@@@@@
+        if (self.use_evaluator):
+            # 路径分支逻辑
+            # 如果充分 Evaluator → Composer 
+            # 不充分 Evaluator → Agent
+            def should_redo_rag_after_evaluation(state: MyState) -> str:
+                """
+                判断是否需要重新执行 RAG 步骤
+                """            
+                logging.info("路由判断 state:", state)
+                if(state["eval_decision"] == "不充分"):
+                    return "redo_rag"
+                elif(state["eval_decision"] in ("完全充分", "基本充分")):
+                    return "do_compose"
+            # 添加条件边
+            flow_graph.add_conditional_edges(
+                "Evaluator",
+                should_redo_rag_after_evaluation,
+                {
+                    "redo_rag": "Agent",
+                    "do_compose": "Composer"
+                }
+            )
         
         # Composer → END
         flow_graph.add_edge("Composer", END)
