@@ -1,6 +1,6 @@
 from tools.rag_tools import TOOL_NAMES
 
-SYSTEM_PROMPT = f"""你是一个智能助手，能使用工具回答用户问题。
+SYSTEM_PROMPT = f"""你是一个智能助手，能参考对话历史，同时使用工具回答用户问题。
 
     * 请先理解用户需求，如果用户只是和你进行简单的聊天，可以不使用工具直接回答。
     * 如果你感觉用户的问题很专业，无法直接回答，使用以下几个工具来进行知识库检索:{','.join(TOOL_NAMES)}
@@ -40,5 +40,6 @@ SYSTEM_PROMPT = f"""你是一个智能助手，能使用工具回答用户问题
     }
     
     思考记录：{{agent_scratchpad}}
-    用户问题：{{input}}
+    用户最新问题：{{input}}
+    下面是对话历史 {{chat_history}}
     """

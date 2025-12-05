@@ -1,6 +1,7 @@
 # uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 
 import json
+from typing import Optional
 from fastapi import FastAPI, WebSocket
 from agent.executor import AgentExecutorWrapper
 from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage, AIMessage, AIMessageChunk
@@ -39,8 +40,13 @@ def _safe_serialize(obj):
     else:
         return obj
 
+'''
+发起聊天对话
+user_id - 用户id，必填
+session_id - 会话id，可以为空，为空就新建session
+'''
 @app.websocket("/agentic_rag_query/{user_id}/{session_id}")
-async def agent_ws(websocket: WebSocket, user_id: str, session_id: str):
+async def agent_ws(websocket: WebSocket, user_id: str, session_id: Optional[str] = None):
     await websocket.accept()
 
     # 为当前用户创建独立的 AgentExecutor
@@ -108,7 +114,7 @@ async def agent_ws(websocket: WebSocket, user_id: str, session_id: str):
                 
             await websocket.send_text(json.dumps({"status": "done"}))
             
-            logging.info(f"query done -- {user_id}")
+            logging.info(f"answer done -- {user_id}-{session_id}")
 
         except Exception as e:
             await websocket.send_text(json.dumps({"error": str(e)}))

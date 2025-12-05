@@ -13,8 +13,8 @@ class CustomLLMFactory():
             },
             { 
                 "name": "local",
-                "model_url": "http://192.168.100.59:1234/v1",
-                "model_name": "qwen/qwen3-8b",
+                "model_url": "http://192.168.100.85:1234/v1",
+                "model_name": "qwen/qwen3-vl-8b",
                 "api_key": "123"
             },
         ]

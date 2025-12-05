@@ -1,5 +1,6 @@
-import json
 import requests
+
+from utils.utils import get_config
 
 # ======== 定义知识库控制器 ========
 class DifyKnowledgeBaseController:
@@ -7,19 +8,12 @@ class DifyKnowledgeBaseController:
         self.base_url = base_url.rstrip("/")
         self.dataset_id = dataset_id
         self.config_file_path = 'dify-config.json'
-        self.dify_config = self._get_config()
+        self.dify_config = get_config()['dify']
         self.headers = {
             "Authorization": f"Bearer {self.dify_config['datasets_api_key']}",
             "Content-Type": "application/json"
         }
-    
-    # 获取dify配置   
-    def _get_config(self) -> dict:
-        config = {}
-        with open(self.config_file_path, 'r') as f:
-            config = json.loads(f.read())
-        return config['dify']
-
+        
     def search(self, query: str):
         """调用 Dify 检索接口"""
         url = f"{self.base_url}/v1/datasets/{self.dataset_id}/retrieve"

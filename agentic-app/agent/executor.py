@@ -3,7 +3,7 @@ from langchain.agents import create_agent
 from langchain_core.prompts.chat import ChatPromptTemplate, MessagesPlaceholder, SystemMessagePromptTemplate, HumanMessagePromptTemplate
 from memory.store import MemoryStore
 
-# 写文件肯定会有并发问题，要改成redis或者数据库持久化历史s
+# 写文件肯定会有并发问题，要改成redis或者数据库持久化历史
 memory_store = MemoryStore()
 
 class AgentExecutorWrapper:

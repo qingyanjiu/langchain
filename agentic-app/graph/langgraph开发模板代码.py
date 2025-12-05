@@ -250,4 +250,4 @@ Agent 回答: {agent_out}
                     "data": chunk
                 }
         
-        self.agent_wrapper.memory_store.persist_user(self.user_id, self.session_id)
+        self.agent_wrapper.memory_store.persist_memory(self.user_id, self.session_id)

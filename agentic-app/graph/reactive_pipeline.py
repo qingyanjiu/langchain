@@ -210,7 +210,7 @@ Agent 回答: {agent_out}
         flow_graph.add_edge("Composer", END)
         # 编译图
         self.graph = flow_graph.compile()
-        gen_flow_graph(self.graph)
+        # gen_flow_graph(self.graph)
 
     '''
     流式调用langgraph，流式返回最终节点数据
@@ -246,4 +246,4 @@ Agent 回答: {agent_out}
                     "data": chunk
                 }
         
-        self.agent_wrapper.memory_store.persist_user(self.user_id, self.session_id)
+        self.agent_wrapper.memory_store.persist_memory(self.user_id, self.session_id)
