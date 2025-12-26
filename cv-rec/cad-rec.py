@@ -14,7 +14,8 @@ def resize_image(img, max_size=1200):
         img = cv2.resize(img, (int(w * scale), int(h * scale)))
     return img, scale
 
-img, scale = resize_image(img, max_size=1200)
+scale = 1
+# img, scale = resize_image(img, max_size=1200)
 hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
 # ======================
@@ -69,7 +70,6 @@ color = {
     "assert": "rgb(0, 0, 255)"
 }
 
-
 # ======================
 # 3. 通用mask函数
 # ======================
@@ -86,6 +86,8 @@ def build_mask(hsv_img, ranges):
 all_points = []
 
 kernel = np.ones((3, 3), np.uint8)  # 去噪核
+
+idx = 0
 
 for device_type, cfg in COLOR_RULES.items():
     mask = build_mask(hsv, cfg["ranges"])
@@ -115,13 +117,15 @@ for device_type, cfg in COLOR_RULES.items():
         cv2.circle(img, (x, y), 6, cfg["draw_color"], 2)
         cv2.putText(
             img,
-            f"({x}, {y})",
-            (x + 5, y - 5),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.2,
+            f"{device_type}-{str(idx)}",
+            (x - 10, y - 12),
+            cv2.FONT_HERSHEY_PLAIN,
+            0.6,
             cfg["draw_color"],
             1
         )
+        
+        idx += 1
 
 # ======================
 # 5. 保存结果
