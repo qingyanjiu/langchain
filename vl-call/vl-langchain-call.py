@@ -2,9 +2,9 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
 
 llm = ChatOpenAI(
-    model="Qwen/Qwen3-VL-8B-Thinking",
+    model="qwen/qwen3-vl-8b",
     openai_api_key="sk-mzwqslirxtrhdtcdwqpdizesufygfocxjckbpehzslsrtass",
-    openai_api_base="https://api.siliconflow.cn/v1",
+    openai_api_base="http://192.168.100.85:1234/v1",
     temperature=0
 )
 
@@ -14,7 +14,7 @@ message = HumanMessage(
         {
             "type": "image_url",
             "image_url": {
-                "url": "http://107.173.83.242:35555/ComfyUI_00022_.png"
+                "url": "http://localhost:555/ComfyUI_00016_.png"
             }
         }
     ]
